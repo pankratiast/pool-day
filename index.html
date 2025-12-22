@@ -45,6 +45,12 @@
             text-transform: uppercase;
             letter-spacing: 1px;
         }
+        #pan-hint {
+            color: rgba(255, 255, 255, 0.5);
+            font-family: system-ui, sans-serif;
+            font-size: 10px;
+            margin-left: 8px;
+        }
         #pov-slider {
             width: 120px;
             height: 4px;
@@ -118,6 +124,7 @@
     <div id="pov-control">
         <label>View</label>
         <input type="range" id="pov-slider" min="0" max="100" value="15">
+        <span id="pan-hint">Right-drag to pan</span>
     </div>
 
     <div id="audio-control">
@@ -591,6 +598,14 @@
         let isMouseDown = false;
         let lastRippleT = 0;
 
+        // Camera panning
+        let cameraTarget = new THREE.Vector3(0, 0, 0);
+        let cameraPanX = 0;
+        let cameraPanZ = 0;
+        let isDragging = false;
+        let dragStart = new THREE.Vector2();
+        let currentPOV = 15;
+
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x075985);
@@ -610,8 +625,11 @@
             cursorEl = document.getElementById('cursor');
 
             createBackdrop();
+            createPoolEdges();
             createFloor();
             createWater();
+            createDivingBoard();
+            createLadder();
             createToys();
 
             window.addEventListener('resize', onResize);
@@ -621,6 +639,10 @@
             window.addEventListener('touchstart', onTouchStart, { passive: false });
             window.addEventListener('touchmove', onTouchMove, { passive: false });
             window.addEventListener('touchend', onTouchEnd);
+
+            // Right-click drag for panning
+            window.addEventListener('contextmenu', (e) => e.preventDefault());
+            window.addEventListener('wheel', onWheel, { passive: false });
 
             // POV slider
             const povSlider = document.getElementById('pov-slider');
@@ -644,13 +666,30 @@
             });
         }
 
-        // Update camera position based on POV slider (0 = bird's eye, 100 = more angled)
+        // Update camera position based on POV slider and pan offset
         function updateCameraPOV(value) {
+            currentPOV = value;
             const t = value / 100;
-            const height = 14 - t * 4;
-            const zOffset = t * 8;
-            camera.position.set(0, height, zOffset);
-            camera.lookAt(0, 0, 0);
+            const height = 16 - t * 5;
+            const zOffset = t * 10;
+            camera.position.set(cameraPanX, height, zOffset + cameraPanZ);
+            cameraTarget.set(cameraPanX, 0, cameraPanZ);
+            camera.lookAt(cameraTarget);
+        }
+
+        // Handle mouse wheel for zooming/panning
+        function onWheel(e) {
+            e.preventDefault();
+            // Shift+wheel for horizontal pan, regular wheel for forward/back
+            if (e.shiftKey) {
+                cameraPanX += e.deltaY * 0.01;
+            } else {
+                cameraPanZ += e.deltaY * 0.01;
+            }
+            // Clamp panning
+            cameraPanX = Math.max(-8, Math.min(8, cameraPanX));
+            cameraPanZ = Math.max(-8, Math.min(8, cameraPanZ));
+            updateCameraPOV(currentPOV);
         }
 
         // ============================================================
@@ -813,41 +852,52 @@
                 fragmentShader: rockFS
             });
 
-            // Main cliff wall (back)
-            const cliffBack = new THREE.BoxGeometry(25, 12, 4);
+            // Main cliff wall (back) - larger and further back
+            const cliffBack = new THREE.BoxGeometry(40, 15, 5);
             const cliffBackMesh = new THREE.Mesh(cliffBack, rockMat);
-            cliffBackMesh.position.set(0, 2, -12);
+            cliffBackMesh.position.set(0, 3, -18);
             scene.add(cliffBackMesh);
 
-            // Left cliff
-            const cliffLeft = new THREE.BoxGeometry(4, 10, 20);
+            // Secondary back cliff layer (depth)
+            const cliffBack2 = new THREE.BoxGeometry(35, 12, 4);
+            const cliffBack2Mesh = new THREE.Mesh(cliffBack2, rockMat.clone());
+            cliffBack2Mesh.position.set(0, 5, -20);
+            scene.add(cliffBack2Mesh);
+
+            // Left cliff - extended
+            const cliffLeft = new THREE.BoxGeometry(5, 12, 35);
             const cliffLeftMesh = new THREE.Mesh(cliffLeft, rockMat.clone());
-            cliffLeftMesh.position.set(-12, 1, -2);
+            cliffLeftMesh.position.set(-18, 2, -5);
             scene.add(cliffLeftMesh);
 
-            // Right cliff
-            const cliffRight = new THREE.BoxGeometry(4, 8, 18);
+            // Right cliff - extended
+            const cliffRight = new THREE.BoxGeometry(5, 10, 30);
             const cliffRightMesh = new THREE.Mesh(cliffRight, rockMat.clone());
-            cliffRightMesh.position.set(12, 0, -1);
+            cliffRightMesh.position.set(18, 1, -3);
             scene.add(cliffRightMesh);
 
-            // Stepped rocks (like in Chao Island)
-            const stepRock1 = new THREE.BoxGeometry(6, 2, 3);
+            // Stepped rocks (like in Chao Island) - behind the pool
+            const stepRock1 = new THREE.BoxGeometry(6, 2.5, 3);
             const step1 = new THREE.Mesh(stepRock1, rockMat.clone());
-            step1.position.set(-4, -1.5, -9);
+            step1.position.set(-6, -1, -14);
             scene.add(step1);
 
-            const stepRock2 = new THREE.BoxGeometry(5, 1.5, 2.5);
+            const stepRock2 = new THREE.BoxGeometry(5, 2, 2.5);
             const step2 = new THREE.Mesh(stepRock2, rockMat.clone());
-            step2.position.set(3, -2, -8);
+            step2.position.set(5, -1.5, -13);
             scene.add(step2);
 
-            const stepRock3 = new THREE.BoxGeometry(4, 3, 3);
+            const stepRock3 = new THREE.BoxGeometry(4, 3.5, 3);
             const step3 = new THREE.Mesh(stepRock3, rockMat.clone());
-            step3.position.set(-7, -0.5, -7);
+            step3.position.set(-10, 0, -12);
             scene.add(step3);
 
-            // Waterfall
+            const stepRock4 = new THREE.BoxGeometry(5, 2.5, 3);
+            const step4 = new THREE.Mesh(stepRock4, rockMat.clone());
+            step4.position.set(9, -0.5, -14);
+            scene.add(step4);
+
+            // Waterfall - positioned on the back cliff
             const waterfallMat = new THREE.ShaderMaterial({
                 uniforms: { uTime: { value: 0 } },
                 vertexShader: waterfallVS,
@@ -855,16 +905,16 @@
                 transparent: true
             });
 
-            const waterfallGeo = new THREE.PlaneGeometry(5, 8);
+            const waterfallGeo = new THREE.PlaneGeometry(6, 12);
             const waterfall = new THREE.Mesh(waterfallGeo, waterfallMat);
-            waterfall.position.set(-2, 2, -9.8);
+            waterfall.position.set(-3, 4, -15.4);
             scene.add(waterfall);
 
             // Store waterfall for animation
             window.waterfallMesh = waterfall;
 
             // Splash pool at base of waterfall
-            const splashGeo = new THREE.CircleGeometry(2, 16);
+            const splashGeo = new THREE.CircleGeometry(3, 16);
             splashGeo.rotateX(-Math.PI / 2);
             const splashMat = new THREE.MeshBasicMaterial({
                 color: 0x6BBED9,
@@ -872,40 +922,47 @@
                 opacity: 0.6
             });
             const splash = new THREE.Mesh(splashGeo, splashMat);
-            splash.position.set(-2, -2.9, -8);
+            splash.position.set(-3, -2.9, -13);
             scene.add(splash);
 
-            // Grass areas
+            // Grass areas - extended surrounding the pool area
             const grassMat = new THREE.ShaderMaterial({
                 vertexShader: rockVS,
                 fragmentShader: grassFS
             });
 
-            // Grass surrounding pool
-            const grassRight = new THREE.PlaneGeometry(10, 20);
+            // Large grass area surrounding pool
+            const grassRight = new THREE.PlaneGeometry(15, 40);
             grassRight.rotateX(-Math.PI / 2);
             const grassRightMesh = new THREE.Mesh(grassRight, grassMat);
-            grassRightMesh.position.set(13, -2.95, 0);
+            grassRightMesh.position.set(18, -2.95, 0);
             scene.add(grassRightMesh);
 
-            const grassLeft = new THREE.PlaneGeometry(8, 18);
+            const grassLeft = new THREE.PlaneGeometry(12, 35);
             grassLeft.rotateX(-Math.PI / 2);
             const grassLeftMesh = new THREE.Mesh(grassLeft, grassMat.clone());
-            grassLeftMesh.position.set(-13, -2.95, 0);
+            grassLeftMesh.position.set(-18, -2.95, 0);
             scene.add(grassLeftMesh);
 
-            const grassFront = new THREE.PlaneGeometry(30, 8);
+            const grassFront = new THREE.PlaneGeometry(50, 15);
             grassFront.rotateX(-Math.PI / 2);
             const grassFrontMesh = new THREE.Mesh(grassFront, grassMat.clone());
-            grassFrontMesh.position.set(0, -2.95, 10);
+            grassFrontMesh.position.set(0, -2.95, 20);
             scene.add(grassFrontMesh);
+
+            // Back grass (between pool and cliffs)
+            const grassBack = new THREE.PlaneGeometry(50, 8);
+            grassBack.rotateX(-Math.PI / 2);
+            const grassBackMesh = new THREE.Mesh(grassBack, grassMat.clone());
+            grassBackMesh.position.set(0, -2.95, -16);
+            scene.add(grassBackMesh);
 
             // Small decorative rocks
             const smallRockGeo = new THREE.DodecahedronGeometry(0.5, 0);
             for (let i = 0; i < 8; i++) {
                 const rock = new THREE.Mesh(smallRockGeo, rockMat.clone());
                 const angle = (i / 8) * Math.PI * 2;
-                const radius = 7 + Math.random() * 2;
+                const radius = 11 + Math.random() * 2;
                 rock.position.set(
                     Math.cos(angle) * radius,
                     -2.5,
@@ -921,6 +978,242 @@
             }
         }
 
+        // ============================================================
+        // POOL EDGES - Walls and coping
+        // ============================================================
+        function createPoolEdges() {
+            const poolWidth = 16;
+            const poolLength = 20;
+            const wallHeight = 0.8;
+            const wallThickness = 0.5;
+            const copingWidth = 0.6;
+            const copingHeight = 0.15;
+
+            // Pool wall material (light concrete/tile)
+            const wallMat = new THREE.MeshStandardMaterial({
+                color: 0xE8E4E0,
+                roughness: 0.8,
+                metalness: 0.1
+            });
+
+            // Pool coping material (cream/sandstone)
+            const copingMat = new THREE.MeshStandardMaterial({
+                color: 0xF5F0E6,
+                roughness: 0.6,
+                metalness: 0.0
+            });
+
+            // Add ambient and directional light for materials
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 5);
+            scene.add(dirLight);
+
+            // Back wall (far side - where diving board will be)
+            const backWall = new THREE.BoxGeometry(poolWidth + wallThickness * 2, wallHeight, wallThickness);
+            const backWallMesh = new THREE.Mesh(backWall, wallMat);
+            backWallMesh.position.set(0, -CONFIG.waterDepth + wallHeight / 2, -poolLength / 2 - wallThickness / 2);
+            scene.add(backWallMesh);
+
+            // Front wall (near side)
+            const frontWall = new THREE.BoxGeometry(poolWidth + wallThickness * 2, wallHeight, wallThickness);
+            const frontWallMesh = new THREE.Mesh(frontWall, wallMat.clone());
+            frontWallMesh.position.set(0, -CONFIG.waterDepth + wallHeight / 2, poolLength / 2 + wallThickness / 2);
+            scene.add(frontWallMesh);
+
+            // Left wall
+            const leftWall = new THREE.BoxGeometry(wallThickness, wallHeight, poolLength);
+            const leftWallMesh = new THREE.Mesh(leftWall, wallMat.clone());
+            leftWallMesh.position.set(-poolWidth / 2 - wallThickness / 2, -CONFIG.waterDepth + wallHeight / 2, 0);
+            scene.add(leftWallMesh);
+
+            // Right wall (where ladder will be)
+            const rightWall = new THREE.BoxGeometry(wallThickness, wallHeight, poolLength);
+            const rightWallMesh = new THREE.Mesh(rightWall, wallMat.clone());
+            rightWallMesh.position.set(poolWidth / 2 + wallThickness / 2, -CONFIG.waterDepth + wallHeight / 2, 0);
+            scene.add(rightWallMesh);
+
+            // Pool coping (lip around the edge)
+            // Back coping
+            const backCoping = new THREE.BoxGeometry(poolWidth + copingWidth * 2 + wallThickness * 2, copingHeight, copingWidth);
+            const backCopingMesh = new THREE.Mesh(backCoping, copingMat);
+            backCopingMesh.position.set(0, -CONFIG.waterDepth + wallHeight + copingHeight / 2, -poolLength / 2 - wallThickness - copingWidth / 2 + 0.1);
+            scene.add(backCopingMesh);
+
+            // Front coping
+            const frontCoping = new THREE.BoxGeometry(poolWidth + copingWidth * 2 + wallThickness * 2, copingHeight, copingWidth);
+            const frontCopingMesh = new THREE.Mesh(frontCoping, copingMat.clone());
+            frontCopingMesh.position.set(0, -CONFIG.waterDepth + wallHeight + copingHeight / 2, poolLength / 2 + wallThickness + copingWidth / 2 - 0.1);
+            scene.add(frontCopingMesh);
+
+            // Left coping
+            const leftCoping = new THREE.BoxGeometry(copingWidth, copingHeight, poolLength + copingWidth * 2);
+            const leftCopingMesh = new THREE.Mesh(leftCoping, copingMat.clone());
+            leftCopingMesh.position.set(-poolWidth / 2 - wallThickness - copingWidth / 2 + 0.1, -CONFIG.waterDepth + wallHeight + copingHeight / 2, 0);
+            scene.add(leftCopingMesh);
+
+            // Right coping
+            const rightCoping = new THREE.BoxGeometry(copingWidth, copingHeight, poolLength + copingWidth * 2);
+            const rightCopingMesh = new THREE.Mesh(rightCoping, copingMat.clone());
+            rightCopingMesh.position.set(poolWidth / 2 + wallThickness + copingWidth / 2 - 0.1, -CONFIG.waterDepth + wallHeight + copingHeight / 2, 0);
+            scene.add(rightCopingMesh);
+
+            // Pool deck (surrounding area)
+            const deckMat = new THREE.MeshStandardMaterial({
+                color: 0xD4C9B8,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+
+            // Back deck
+            const backDeck = new THREE.BoxGeometry(poolWidth + 6, 0.2, 4);
+            const backDeckMesh = new THREE.Mesh(backDeck, deckMat);
+            backDeckMesh.position.set(0, -CONFIG.waterDepth + wallHeight + 0.05, -poolLength / 2 - 3);
+            scene.add(backDeckMesh);
+
+            // Front deck
+            const frontDeck = new THREE.BoxGeometry(poolWidth + 6, 0.2, 4);
+            const frontDeckMesh = new THREE.Mesh(frontDeck, deckMat.clone());
+            frontDeckMesh.position.set(0, -CONFIG.waterDepth + wallHeight + 0.05, poolLength / 2 + 3);
+            scene.add(frontDeckMesh);
+
+            // Left deck
+            const leftDeck = new THREE.BoxGeometry(3, 0.2, poolLength + 8);
+            const leftDeckMesh = new THREE.Mesh(leftDeck, deckMat.clone());
+            leftDeckMesh.position.set(-poolWidth / 2 - 2.5, -CONFIG.waterDepth + wallHeight + 0.05, 0);
+            scene.add(leftDeckMesh);
+
+            // Right deck
+            const rightDeck = new THREE.BoxGeometry(3, 0.2, poolLength + 8);
+            const rightDeckMesh = new THREE.Mesh(rightDeck, deckMat.clone());
+            rightDeckMesh.position.set(poolWidth / 2 + 2.5, -CONFIG.waterDepth + wallHeight + 0.05, 0);
+            scene.add(rightDeckMesh);
+        }
+
+        // ============================================================
+        // DIVING BOARD
+        // ============================================================
+        function createDivingBoard() {
+            const boardMat = new THREE.MeshStandardMaterial({
+                color: 0x2E86AB,
+                roughness: 0.4,
+                metalness: 0.3
+            });
+
+            const supportMat = new THREE.MeshStandardMaterial({
+                color: 0xC0C0C0,
+                roughness: 0.3,
+                metalness: 0.8
+            });
+
+            const baseMat = new THREE.MeshStandardMaterial({
+                color: 0x404040,
+                roughness: 0.7,
+                metalness: 0.2
+            });
+
+            const poolLength = 20;
+            const deckY = -CONFIG.waterDepth + 0.8;
+
+            // Base platform
+            const baseGeo = new THREE.BoxGeometry(1.5, 0.3, 2);
+            const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+            baseMesh.position.set(0, deckY + 0.35, -poolLength / 2 - 2.5);
+            scene.add(baseMesh);
+
+            // Support pillars
+            const pillarGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.2, 12);
+            const pillar1 = new THREE.Mesh(pillarGeo, supportMat);
+            pillar1.position.set(-0.4, deckY + 0.5 + 0.6, -poolLength / 2 - 2);
+            scene.add(pillar1);
+
+            const pillar2 = new THREE.Mesh(pillarGeo.clone(), supportMat.clone());
+            pillar2.position.set(0.4, deckY + 0.5 + 0.6, -poolLength / 2 - 2);
+            scene.add(pillar2);
+
+            // Cross support
+            const crossGeo = new THREE.BoxGeometry(1.0, 0.1, 0.1);
+            const crossMesh = new THREE.Mesh(crossGeo, supportMat.clone());
+            crossMesh.position.set(0, deckY + 0.9, -poolLength / 2 - 2);
+            scene.add(crossMesh);
+
+            // The diving board itself
+            const boardGeo = new THREE.BoxGeometry(0.6, 0.08, 3.5);
+            const boardMesh = new THREE.Mesh(boardGeo, boardMat);
+            boardMesh.position.set(0, deckY + 1.25, -poolLength / 2 - 0.5);
+            // Slight tilt upward at the end
+            boardMesh.rotation.x = -0.05;
+            scene.add(boardMesh);
+
+            // Non-slip surface texture (stripes)
+            const stripeMat = new THREE.MeshStandardMaterial({
+                color: 0x1A5276,
+                roughness: 0.6,
+                metalness: 0.2
+            });
+            for (let i = 0; i < 5; i++) {
+                const stripeGeo = new THREE.BoxGeometry(0.5, 0.01, 0.08);
+                const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+                stripe.position.set(0, deckY + 1.3, -poolLength / 2 - 1.5 + i * 0.4);
+                stripe.rotation.x = -0.05;
+                scene.add(stripe);
+            }
+        }
+
+        // ============================================================
+        // POOL LADDER
+        // ============================================================
+        function createLadder() {
+            const metalMat = new THREE.MeshStandardMaterial({
+                color: 0xC0C0C0,
+                roughness: 0.2,
+                metalness: 0.9
+            });
+
+            const poolWidth = 16;
+            const deckY = -CONFIG.waterDepth + 0.8;
+            const ladderX = poolWidth / 2 + 0.3;
+            const ladderZ = 2;
+
+            // Vertical rails
+            const railGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.5, 12);
+
+            const leftRail = new THREE.Mesh(railGeo, metalMat);
+            leftRail.position.set(ladderX, deckY - 0.4, ladderZ - 0.25);
+            scene.add(leftRail);
+
+            const rightRail = new THREE.Mesh(railGeo.clone(), metalMat.clone());
+            rightRail.position.set(ladderX, deckY - 0.4, ladderZ + 0.25);
+            scene.add(rightRail);
+
+            // Curved top handles
+            const handleCurve = new THREE.QuadraticBezierCurve3(
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(-0.3, 0.2, 0),
+                new THREE.Vector3(-0.3, 0.5, 0)
+            );
+            const handleGeo = new THREE.TubeGeometry(handleCurve, 12, 0.04, 8, false);
+
+            const leftHandle = new THREE.Mesh(handleGeo, metalMat.clone());
+            leftHandle.position.set(ladderX, deckY + 0.8, ladderZ - 0.25);
+            scene.add(leftHandle);
+
+            const rightHandle = new THREE.Mesh(handleGeo.clone(), metalMat.clone());
+            rightHandle.position.set(ladderX, deckY + 0.8, ladderZ + 0.25);
+            scene.add(rightHandle);
+
+            // Rungs (steps)
+            const rungGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 12);
+            rungGeo.rotateX(Math.PI / 2);
+
+            for (let i = 0; i < 4; i++) {
+                const rung = new THREE.Mesh(rungGeo.clone(), metalMat.clone());
+                rung.position.set(ladderX, deckY - 1.4 + i * 0.5, ladderZ);
+                scene.add(rung);
+            }
+        }
+
         function createRippleUniforms() {
             return {
                 uRipplePositions: { value: [] },
@@ -930,7 +1223,7 @@
         }
 
         function createFloor() {
-            const geo = new THREE.PlaneGeometry(20, 20);
+            const geo = new THREE.PlaneGeometry(16, 20);
             geo.rotateX(-Math.PI / 2);
 
             const mat = new THREE.ShaderMaterial({
@@ -955,7 +1248,7 @@
         }
 
         function createWater() {
-            const geo = new THREE.PlaneGeometry(20, 20, 80, 80);
+            const geo = new THREE.PlaneGeometry(16, 20, 64, 80);
             geo.rotateX(-Math.PI / 2);
 
             const mat = new THREE.ShaderMaterial({
@@ -1167,6 +1460,19 @@
             cursorEl.style.left = e.clientX + 'px';
             cursorEl.style.top = e.clientY + 'px';
 
+            // Handle panning while right-click dragging
+            if (isDragging) {
+                const deltaX = (e.clientX - dragStart.x) * 0.02;
+                const deltaY = (e.clientY - dragStart.y) * 0.02;
+                cameraPanX -= deltaX;
+                cameraPanZ -= deltaY;
+                cameraPanX = Math.max(-10, Math.min(10, cameraPanX));
+                cameraPanZ = Math.max(-12, Math.min(12, cameraPanZ));
+                dragStart.set(e.clientX, e.clientY);
+                updateCameraPOV(currentPOV);
+                return;
+            }
+
             const wp = screenToWorld(e.clientX, e.clientY);
             if (!wp) return;
 
@@ -1181,6 +1487,13 @@
         }
 
         function onMouseDown(e) {
+            // Right-click for panning
+            if (e.button === 2) {
+                isDragging = true;
+                dragStart.set(e.clientX, e.clientY);
+                return;
+            }
+
             isMouseDown = true;
             cursorEl.classList.add('active');
             const wp = screenToWorld(e.clientX, e.clientY);
@@ -1190,7 +1503,11 @@
             }
         }
 
-        function onMouseUp() {
+        function onMouseUp(e) {
+            if (e.button === 2) {
+                isDragging = false;
+                return;
+            }
             isMouseDown = false;
             cursorEl.classList.remove('active');
         }
@@ -1283,16 +1600,17 @@
                 group.driftSpeed *= 0.995;
                 if (group.driftSpeed < 0.005) group.driftSpeed = 0.005;
 
-                // Bounce off edges - gentle
-                const bounds = 6;
-                if (Math.abs(group.position.x) > bounds) {
+                // Bounce off edges - gentle (pool is 16 wide x 20 long)
+                const boundsX = 7;
+                const boundsZ = 9;
+                if (Math.abs(group.position.x) > boundsX) {
                     group.driftDir.x *= -0.5;
-                    group.position.x = Math.sign(group.position.x) * bounds;
+                    group.position.x = Math.sign(group.position.x) * boundsX;
                     group.driftSpeed *= 0.7;
                 }
-                if (Math.abs(group.position.z) > bounds) {
+                if (Math.abs(group.position.z) > boundsZ) {
                     group.driftDir.y *= -0.5;
-                    group.position.z = Math.sign(group.position.z) * bounds;
+                    group.position.z = Math.sign(group.position.z) * boundsZ;
                     group.driftSpeed *= 0.7;
                 }
 
