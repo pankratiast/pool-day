@@ -196,6 +196,12 @@
         import * as THREE from 'three';
 
         // ============================================================
+        // MOBILE DETECTION
+        // ============================================================
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+            || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+
+        // ============================================================
         // CONFIG - Deeper blue like reference image
         // ============================================================
         const CONFIG = {
@@ -220,6 +226,14 @@
         // ============================================================
         const ripples = [];
         const MAX_RIPPLES = CONFIG.maxRipples;
+
+        // Pre-allocate Vector2 arrays to avoid GC pressure
+        const ripplePositionsCache = [];
+        const rippleParamsCache = [];
+        for (let i = 0; i < MAX_RIPPLES; i++) {
+            ripplePositionsCache.push(new THREE.Vector2(0, 0));
+            rippleParamsCache.push(new THREE.Vector2(-1, 0));
+        }
 
         function addRipple(x, z, strength = CONFIG.rippleStrength) {
             ripples.push({ x, z, time: 0, strength });
@@ -661,9 +675,11 @@
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
             updateCameraPOV(15);  // Default: 1-2 o'clock position
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // Disable anti-aliasing on mobile for performance
+            renderer = new THREE.WebGLRenderer({ antialias: !isMobile });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            // Lower pixel ratio on mobile (1 vs 2) for major performance boost
+            renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
             document.body.appendChild(renderer.domElement);
 
             clock = new THREE.Clock();
@@ -1987,7 +2003,8 @@
         // RAIN SYSTEM
         // ============================================================
         function createRain() {
-            const rainCount = 3000;
+            // Fewer rain particles on mobile
+            const rainCount = isMobile ? 1000 : 3000;
             rainGeometry = new THREE.BufferGeometry();
             const positions = new Float32Array(rainCount * 3);
             const velocities = new Float32Array(rainCount);
@@ -2094,7 +2111,9 @@
         }
 
         function createWater() {
-            const geo = new THREE.PlaneGeometry(16, 20, 64, 80);
+            // Lower resolution on mobile: 32x40 vs 64x80 (4x fewer vertices)
+            const segments = isMobile ? [32, 40] : [64, 80];
+            const geo = new THREE.PlaneGeometry(16, 20, segments[0], segments[1]);
             geo.rotateX(-Math.PI / 2);
 
             const mat = new THREE.ShaderMaterial({
@@ -2427,21 +2446,21 @@
 
         function updateUniforms() {
             const data = getRippleData();
-            const positions = [], params = [];
 
+            // Reuse pre-allocated Vector2 arrays instead of creating new objects
             for (let i = 0; i < MAX_RIPPLES; i++) {
-                positions.push(new THREE.Vector2(data.positions[i * 2], data.positions[i * 2 + 1]));
-                params.push(new THREE.Vector2(data.params[i * 2], data.params[i * 2 + 1]));
+                ripplePositionsCache[i].set(data.positions[i * 2], data.positions[i * 2 + 1]);
+                rippleParamsCache[i].set(data.params[i * 2], data.params[i * 2 + 1]);
             }
 
-            floor.material.uniforms.uRipplePositions.value = positions;
-            floor.material.uniforms.uRippleParams.value = params;
-            water.material.uniforms.uRipplePositions.value = positions;
-            water.material.uniforms.uRippleParams.value = params;
+            floor.material.uniforms.uRipplePositions.value = ripplePositionsCache;
+            floor.material.uniforms.uRippleParams.value = rippleParamsCache;
+            water.material.uniforms.uRipplePositions.value = ripplePositionsCache;
+            water.material.uniforms.uRippleParams.value = rippleParamsCache;
 
             toys.forEach(toy => {
-                toy.material.uniforms.uRipplePositions.value = positions;
-                toy.material.uniforms.uRippleParams.value = params;
+                toy.material.uniforms.uRipplePositions.value = ripplePositionsCache;
+                toy.material.uniforms.uRippleParams.value = rippleParamsCache;
             });
         }
 
