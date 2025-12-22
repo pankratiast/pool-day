@@ -676,6 +676,8 @@
             createFloor();
             createWater();
             createGazebo();
+            createPottedPlants();
+            createTallPalmTree();
             createStatues();
             createDivingBoard();
             createPoolChair();
@@ -1009,16 +1011,16 @@
             sandMesh.position.set(-22, -2.95, 0);
             scene.add(sandMesh);
 
-            // Gravel area (right side) - rocky path
-            const gravelMat = new THREE.ShaderMaterial({
+            // Sand area (right side) - matching left side
+            const sandMatRight = new THREE.ShaderMaterial({
                 vertexShader: rockVS,
-                fragmentShader: gravelFS
+                fragmentShader: sandFS
             });
-            const gravelArea = new THREE.PlaneGeometry(25, 50);
-            gravelArea.rotateX(-Math.PI / 2);
-            const gravelMesh = new THREE.Mesh(gravelArea, gravelMat);
-            gravelMesh.position.set(22, -2.95, 0);
-            scene.add(gravelMesh);
+            const sandAreaRight = new THREE.PlaneGeometry(25, 50);
+            sandAreaRight.rotateX(-Math.PI / 2);
+            const sandMeshRight = new THREE.Mesh(sandAreaRight, sandMatRight);
+            sandMeshRight.position.set(22, -2.95, 0);
+            scene.add(sandMeshRight);
 
             // Stepped rocks (like in Chao Island) - behind the pool
             const stepRock1 = new THREE.BoxGeometry(6, 2.5, 3);
@@ -1288,6 +1290,256 @@
             const sphereMesh = new THREE.Mesh(sphereGeo, marbleMat.clone());
             sphereMesh.position.set(0, gazeboY + 6.7, gazeboZ);
             scene.add(sphereMesh);
+        }
+
+        // ============================================================
+        // POTTED PLANTS (near gazebo)
+        // ============================================================
+        function createPottedPlants() {
+            const poolLength = 20;
+            const deckY = -CONFIG.waterDepth + 0.8;
+            const gazeboZ = -poolLength / 2 - 4;
+
+            // Terracotta pot material
+            const potMat = new THREE.MeshStandardMaterial({
+                color: 0xC67B4E,
+                roughness: 0.7,
+                metalness: 0.1
+            });
+
+            // Soil material
+            const soilMat = new THREE.MeshStandardMaterial({
+                color: 0x4A3728,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+
+            // Plant leaf material
+            const leafMat = new THREE.MeshStandardMaterial({
+                color: 0x2D5A27,
+                roughness: 0.6,
+                metalness: 0.0
+            });
+
+            function createPottedPlant(x, z, plantType = 'bush') {
+                const group = new THREE.Group();
+
+                // Pot body
+                const potGeo = new THREE.CylinderGeometry(0.35, 0.25, 0.5, 16);
+                const pot = new THREE.Mesh(potGeo, potMat);
+                pot.position.y = 0.25;
+                group.add(pot);
+
+                // Pot rim
+                const rimGeo = new THREE.TorusGeometry(0.37, 0.05, 8, 16);
+                rimGeo.rotateX(Math.PI / 2);
+                const rim = new THREE.Mesh(rimGeo, potMat.clone());
+                rim.position.y = 0.5;
+                group.add(rim);
+
+                // Soil
+                const soilGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.08, 16);
+                const soil = new THREE.Mesh(soilGeo, soilMat);
+                soil.position.y = 0.48;
+                group.add(soil);
+
+                if (plantType === 'bush') {
+                    // Bushy plant with multiple leaf clusters
+                    for (let i = 0; i < 5; i++) {
+                        const leafCluster = new THREE.SphereGeometry(0.2 + Math.random() * 0.1, 8, 6);
+                        const leaf = new THREE.Mesh(leafCluster, leafMat.clone());
+                        const angle = (i / 5) * Math.PI * 2;
+                        leaf.position.set(
+                            Math.cos(angle) * 0.15,
+                            0.7 + Math.random() * 0.2,
+                            Math.sin(angle) * 0.15
+                        );
+                        group.add(leaf);
+                    }
+                    // Central top cluster
+                    const topCluster = new THREE.SphereGeometry(0.25, 8, 6);
+                    const top = new THREE.Mesh(topCluster, leafMat.clone());
+                    top.position.y = 0.95;
+                    group.add(top);
+                } else if (plantType === 'fern') {
+                    // Fern with upward spreading fronds
+                    for (let i = 0; i < 8; i++) {
+                        const frondGeo = new THREE.ConeGeometry(0.08, 0.6, 4);
+                        const frond = new THREE.Mesh(frondGeo, leafMat.clone());
+                        const angle = (i / 8) * Math.PI * 2;
+                        frond.position.set(
+                            Math.cos(angle) * 0.1,
+                            0.7,
+                            Math.sin(angle) * 0.1
+                        );
+                        frond.rotation.x = -0.4;
+                        frond.rotation.y = angle;
+                        group.add(frond);
+                    }
+                } else if (plantType === 'flowering') {
+                    // Flowering plant with colorful blooms
+                    const flowerMat = new THREE.MeshStandardMaterial({
+                        color: 0xFF6B9D,
+                        roughness: 0.5
+                    });
+                    // Leaves
+                    for (let i = 0; i < 4; i++) {
+                        const leafGeo = new THREE.SphereGeometry(0.15, 8, 6);
+                        leafGeo.scale(1, 0.5, 1.5);
+                        const leaf = new THREE.Mesh(leafGeo, leafMat.clone());
+                        const angle = (i / 4) * Math.PI * 2;
+                        leaf.position.set(
+                            Math.cos(angle) * 0.2,
+                            0.6,
+                            Math.sin(angle) * 0.2
+                        );
+                        leaf.rotation.y = angle;
+                        group.add(leaf);
+                    }
+                    // Flowers
+                    for (let i = 0; i < 3; i++) {
+                        const flowerGeo = new THREE.SphereGeometry(0.1, 8, 6);
+                        const flower = new THREE.Mesh(flowerGeo, flowerMat);
+                        flower.position.set(
+                            (Math.random() - 0.5) * 0.3,
+                            0.85 + Math.random() * 0.15,
+                            (Math.random() - 0.5) * 0.3
+                        );
+                        group.add(flower);
+                    }
+                }
+
+                group.position.set(x, deckY, z);
+                scene.add(group);
+            }
+
+            // Place potted plants near the gazebo
+            createPottedPlant(-2.5, gazeboZ + 2, 'bush');
+            createPottedPlant(2.5, gazeboZ + 2, 'fern');
+            createPottedPlant(-3.5, gazeboZ + 0.5, 'flowering');
+            createPottedPlant(3.5, gazeboZ + 0.5, 'bush');
+        }
+
+        // ============================================================
+        // TALL PALM TREE (top right area)
+        // ============================================================
+        function createTallPalmTree() {
+            const poolWidth = 16;
+            const poolLength = 20;
+            const deckY = -CONFIG.waterDepth + 0.8;
+
+            // Position: top right, above Hercules statue
+            const palmX = poolWidth / 2 + 5;
+            const palmZ = -poolLength / 2 + 2;
+
+            // Trunk material (brown bark)
+            const trunkMat = new THREE.MeshStandardMaterial({
+                color: 0x8B5A2B,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+
+            // Leaf material
+            const leafMat = new THREE.MeshStandardMaterial({
+                color: 0x228B22,
+                roughness: 0.6,
+                metalness: 0.0,
+                side: THREE.DoubleSide
+            });
+
+            // Coconut material
+            const coconutMat = new THREE.MeshStandardMaterial({
+                color: 0x654321,
+                roughness: 0.8,
+                metalness: 0.0
+            });
+
+            const group = new THREE.Group();
+
+            // Tall trunk with segments
+            const trunkHeight = 8;
+            const segments = 12;
+            for (let i = 0; i < segments; i++) {
+                const segmentHeight = trunkHeight / segments;
+                const bottomRadius = 0.4 - (i * 0.02);
+                const topRadius = 0.38 - (i * 0.02);
+                const segmentGeo = new THREE.CylinderGeometry(topRadius, bottomRadius, segmentHeight, 12);
+                const segment = new THREE.Mesh(segmentGeo, trunkMat.clone());
+                segment.position.y = i * segmentHeight + segmentHeight / 2;
+
+                // Add slight curve to trunk
+                segment.position.x = Math.sin(i * 0.15) * 0.1;
+                segment.position.z = Math.cos(i * 0.1) * 0.05;
+                group.add(segment);
+
+                // Segment rings (bark texture)
+                if (i % 2 === 0) {
+                    const ringGeo = new THREE.TorusGeometry(bottomRadius + 0.02, 0.03, 6, 16);
+                    ringGeo.rotateX(Math.PI / 2);
+                    const ring = new THREE.Mesh(ringGeo, trunkMat.clone());
+                    ring.position.y = i * segmentHeight;
+                    ring.position.x = segment.position.x;
+                    ring.position.z = segment.position.z;
+                    group.add(ring);
+                }
+            }
+
+            // Crown of palm fronds
+            const frondCount = 12;
+            for (let i = 0; i < frondCount; i++) {
+                const angle = (i / frondCount) * Math.PI * 2;
+
+                // Each frond is made of multiple segments
+                const frondGroup = new THREE.Group();
+
+                // Main frond stem
+                const stemLength = 3 + Math.random() * 0.5;
+                const stemGeo = new THREE.CylinderGeometry(0.03, 0.05, stemLength, 6);
+                const stem = new THREE.Mesh(stemGeo, leafMat.clone());
+                stem.position.y = stemLength / 2;
+                stem.rotation.x = 0.6 + Math.random() * 0.3;
+                frondGroup.add(stem);
+
+                // Leaflets along the stem
+                for (let j = 0; j < 8; j++) {
+                    const leafletGeo = new THREE.PlaneGeometry(0.15, 0.8);
+                    const leaflet = new THREE.Mesh(leafletGeo, leafMat.clone());
+                    leaflet.position.y = 0.4 + j * 0.3;
+                    leaflet.position.x = 0.15;
+                    leaflet.rotation.z = -0.3;
+                    leaflet.rotation.y = 0.2;
+                    frondGroup.add(leaflet);
+
+                    const leaflet2 = new THREE.Mesh(leafletGeo.clone(), leafMat.clone());
+                    leaflet2.position.y = 0.4 + j * 0.3;
+                    leaflet2.position.x = -0.15;
+                    leaflet2.rotation.z = 0.3;
+                    leaflet2.rotation.y = -0.2;
+                    frondGroup.add(leaflet2);
+                }
+
+                frondGroup.position.y = trunkHeight;
+                frondGroup.rotation.y = angle;
+                group.add(frondGroup);
+            }
+
+            // Coconuts (cluster at top of trunk)
+            const coconutPositions = [
+                [0.25, trunkHeight - 0.3, 0.1],
+                [-0.2, trunkHeight - 0.4, 0.2],
+                [0.1, trunkHeight - 0.2, -0.25],
+                [-0.15, trunkHeight - 0.5, -0.15]
+            ];
+            coconutPositions.forEach(pos => {
+                const coconutGeo = new THREE.SphereGeometry(0.2, 12, 10);
+                coconutGeo.scale(1, 1.2, 1);
+                const coconut = new THREE.Mesh(coconutGeo, coconutMat);
+                coconut.position.set(pos[0], pos[1], pos[2]);
+                group.add(coconut);
+            });
+
+            group.position.set(palmX, deckY - 0.5, palmZ);
+            scene.add(group);
         }
 
         // ============================================================
