@@ -2376,6 +2376,10 @@
         }
 
         function onTouchStart(e) {
+            // Allow touch events on UI controls
+            if (e.target.closest('#pov-control, #audio-control, #weather-control')) {
+                return;
+            }
             e.preventDefault();
             const t = e.touches[0];
             cursorEl.style.left = t.clientX + 'px';
@@ -2391,6 +2395,10 @@
         }
 
         function onTouchMove(e) {
+            // Allow touch events on UI controls
+            if (e.target.closest('#pov-control, #audio-control, #weather-control')) {
+                return;
+            }
             e.preventDefault();
             const t = e.touches[0];
             cursorEl.style.left = t.clientX + 'px';
