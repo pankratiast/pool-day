@@ -74,6 +74,43 @@
             border: none;
             box-shadow: 0 2px 6px rgba(0,0,0,0.3);
         }
+        /* Audio Control */
+        #audio-control {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        #audio-btn {
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, transform 0.2s;
+        }
+        #audio-btn:hover {
+            background: rgba(0, 0, 0, 0.5);
+            transform: scale(1.1);
+        }
+        #audio-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: rgba(255, 255, 255, 0.8);
+        }
+        #audio-btn.muted svg.unmuted,
+        #audio-btn:not(.muted) svg.muted {
+            display: none;
+        }
+        #audio-btn.muted svg.muted,
+        #audio-btn:not(.muted) svg.unmuted {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -81,6 +118,22 @@
     <div id="pov-control">
         <label>View</label>
         <input type="range" id="pov-slider" min="0" max="100" value="15">
+    </div>
+
+    <div id="audio-control">
+        <audio id="bg-audio" loop>
+            <source src="GORE - あなたの愛への奴隷.mp3" type="audio/mpeg">
+        </audio>
+        <button id="audio-btn" class="muted" title="Toggle sound">
+            <!-- Unmuted icon (speaker with waves) -->
+            <svg class="unmuted" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>
+            <!-- Muted icon (speaker with X) -->
+            <svg class="muted" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+            </svg>
+        </button>
     </div>
 
     <script type="importmap">
@@ -556,6 +609,7 @@
             mouse = new THREE.Vector2();
             cursorEl = document.getElementById('cursor');
 
+            createBackdrop();
             createFloor();
             createWater();
             createToys();
@@ -573,17 +627,298 @@
             povSlider.addEventListener('input', (e) => {
                 updateCameraPOV(parseFloat(e.target.value));
             });
+
+            // Audio control
+            const audioBtn = document.getElementById('audio-btn');
+            const bgAudio = document.getElementById('bg-audio');
+            bgAudio.volume = 0.5;
+
+            audioBtn.addEventListener('click', () => {
+                if (audioBtn.classList.contains('muted')) {
+                    bgAudio.play();
+                    audioBtn.classList.remove('muted');
+                } else {
+                    bgAudio.pause();
+                    audioBtn.classList.add('muted');
+                }
+            });
         }
 
         // Update camera position based on POV slider (0 = bird's eye, 100 = more angled)
         function updateCameraPOV(value) {
-            // value 0-100 maps to camera tilt
-            // 0 = pure top-down, 100 = significant angle
             const t = value / 100;
-            const height = 14 - t * 4;      // 14 down to 10
-            const zOffset = t * 8;           // 0 up to 8
+            const height = 14 - t * 4;
+            const zOffset = t * 8;
             camera.position.set(0, height, zOffset);
             camera.lookAt(0, 0, 0);
+        }
+
+        // ============================================================
+        // BACKDROP - Rocky cliffs, waterfall, grass (Chao Island style)
+        // ============================================================
+        const rockVS = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                vUv = uv;
+                vNormal = normalize(normalMatrix * normal);
+                vec4 wp = modelMatrix * vec4(position, 1.0);
+                vWorldPos = wp.xyz;
+                gl_Position = projectionMatrix * viewMatrix * wp;
+            }
+        `;
+
+        const rockFS = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            // Simple hash for noise
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+
+            float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = hash(i);
+                float b = hash(i + vec2(1.0, 0.0));
+                float c = hash(i + vec2(0.0, 1.0));
+                float d = hash(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+
+            void main() {
+                vec3 light = normalize(vec3(0.3, 1.0, 0.2));
+                float diff = max(dot(vNormal, light), 0.0) * 0.5 + 0.5;
+
+                // Rocky texture
+                float n = noise(vWorldPos.xz * 2.0) * 0.5 + noise(vWorldPos.xy * 4.0) * 0.3;
+
+                // Base rock colors (gray-purple like Chao Island)
+                vec3 rockColor1 = vec3(0.45, 0.42, 0.5);
+                vec3 rockColor2 = vec3(0.55, 0.52, 0.58);
+                vec3 rockColor3 = vec3(0.38, 0.35, 0.42);
+
+                vec3 col = mix(rockColor1, rockColor2, n);
+                col = mix(col, rockColor3, noise(vWorldPos.yz * 3.0) * 0.4);
+
+                col *= diff;
+
+                // Darken crevices based on normal
+                float crevice = 1.0 - abs(vNormal.y) * 0.3;
+                col *= crevice;
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `;
+
+        const waterfallVS = `
+            varying vec2 vUv;
+            varying vec3 vWorldPos;
+            void main() {
+                vUv = uv;
+                vec4 wp = modelMatrix * vec4(position, 1.0);
+                vWorldPos = wp.xyz;
+                gl_Position = projectionMatrix * viewMatrix * wp;
+            }
+        `;
+
+        const waterfallFS = `
+            uniform float uTime;
+            varying vec2 vUv;
+            varying vec3 vWorldPos;
+
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+
+            float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                           mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+            }
+
+            void main() {
+                vec2 uv = vUv;
+
+                // Flowing water effect
+                float flow = uTime * 2.0;
+                float n1 = noise(vec2(uv.x * 8.0, uv.y * 4.0 - flow));
+                float n2 = noise(vec2(uv.x * 12.0 + 5.0, uv.y * 6.0 - flow * 1.3));
+                float n3 = noise(vec2(uv.x * 20.0, uv.y * 10.0 - flow * 1.8));
+
+                float foam = smoothstep(0.5, 0.8, n1) + smoothstep(0.6, 0.9, n2) * 0.5;
+                foam += smoothstep(0.7, 1.0, n3) * 0.3;
+
+                // Water colors
+                vec3 waterColor = vec3(0.3, 0.6, 0.8);
+                vec3 foamColor = vec3(0.85, 0.95, 1.0);
+
+                vec3 col = mix(waterColor, foamColor, foam * 0.7);
+
+                // Brighter at edges (splash)
+                float edge = smoothstep(0.0, 0.15, uv.x) * smoothstep(0.0, 0.15, 1.0 - uv.x);
+                col = mix(foamColor, col, edge);
+
+                // Fade at bottom (mist)
+                float mist = smoothstep(0.0, 0.3, uv.y);
+                col = mix(vec3(0.7, 0.85, 0.95), col, mist);
+
+                gl_FragColor = vec4(col, 0.9);
+            }
+        `;
+
+        const grassFS = `
+            varying vec2 vUv;
+            varying vec3 vWorldPos;
+
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+
+            float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                           mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+            }
+
+            void main() {
+                float n = noise(vWorldPos.xz * 3.0);
+                float n2 = noise(vWorldPos.xz * 8.0);
+
+                vec3 grass1 = vec3(0.2, 0.6, 0.15);
+                vec3 grass2 = vec3(0.3, 0.75, 0.2);
+                vec3 grass3 = vec3(0.15, 0.5, 0.1);
+
+                vec3 col = mix(grass1, grass2, n);
+                col = mix(col, grass3, n2 * 0.3);
+
+                // Slight variation
+                col *= 0.9 + n2 * 0.2;
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `;
+
+        function createBackdrop() {
+            const rockMat = new THREE.ShaderMaterial({
+                vertexShader: rockVS,
+                fragmentShader: rockFS
+            });
+
+            // Main cliff wall (back)
+            const cliffBack = new THREE.BoxGeometry(25, 12, 4);
+            const cliffBackMesh = new THREE.Mesh(cliffBack, rockMat);
+            cliffBackMesh.position.set(0, 2, -12);
+            scene.add(cliffBackMesh);
+
+            // Left cliff
+            const cliffLeft = new THREE.BoxGeometry(4, 10, 20);
+            const cliffLeftMesh = new THREE.Mesh(cliffLeft, rockMat.clone());
+            cliffLeftMesh.position.set(-12, 1, -2);
+            scene.add(cliffLeftMesh);
+
+            // Right cliff
+            const cliffRight = new THREE.BoxGeometry(4, 8, 18);
+            const cliffRightMesh = new THREE.Mesh(cliffRight, rockMat.clone());
+            cliffRightMesh.position.set(12, 0, -1);
+            scene.add(cliffRightMesh);
+
+            // Stepped rocks (like in Chao Island)
+            const stepRock1 = new THREE.BoxGeometry(6, 2, 3);
+            const step1 = new THREE.Mesh(stepRock1, rockMat.clone());
+            step1.position.set(-4, -1.5, -9);
+            scene.add(step1);
+
+            const stepRock2 = new THREE.BoxGeometry(5, 1.5, 2.5);
+            const step2 = new THREE.Mesh(stepRock2, rockMat.clone());
+            step2.position.set(3, -2, -8);
+            scene.add(step2);
+
+            const stepRock3 = new THREE.BoxGeometry(4, 3, 3);
+            const step3 = new THREE.Mesh(stepRock3, rockMat.clone());
+            step3.position.set(-7, -0.5, -7);
+            scene.add(step3);
+
+            // Waterfall
+            const waterfallMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 } },
+                vertexShader: waterfallVS,
+                fragmentShader: waterfallFS,
+                transparent: true
+            });
+
+            const waterfallGeo = new THREE.PlaneGeometry(5, 8);
+            const waterfall = new THREE.Mesh(waterfallGeo, waterfallMat);
+            waterfall.position.set(-2, 2, -9.8);
+            scene.add(waterfall);
+
+            // Store waterfall for animation
+            window.waterfallMesh = waterfall;
+
+            // Splash pool at base of waterfall
+            const splashGeo = new THREE.CircleGeometry(2, 16);
+            splashGeo.rotateX(-Math.PI / 2);
+            const splashMat = new THREE.MeshBasicMaterial({
+                color: 0x6BBED9,
+                transparent: true,
+                opacity: 0.6
+            });
+            const splash = new THREE.Mesh(splashGeo, splashMat);
+            splash.position.set(-2, -2.9, -8);
+            scene.add(splash);
+
+            // Grass areas
+            const grassMat = new THREE.ShaderMaterial({
+                vertexShader: rockVS,
+                fragmentShader: grassFS
+            });
+
+            // Grass surrounding pool
+            const grassRight = new THREE.PlaneGeometry(10, 20);
+            grassRight.rotateX(-Math.PI / 2);
+            const grassRightMesh = new THREE.Mesh(grassRight, grassMat);
+            grassRightMesh.position.set(13, -2.95, 0);
+            scene.add(grassRightMesh);
+
+            const grassLeft = new THREE.PlaneGeometry(8, 18);
+            grassLeft.rotateX(-Math.PI / 2);
+            const grassLeftMesh = new THREE.Mesh(grassLeft, grassMat.clone());
+            grassLeftMesh.position.set(-13, -2.95, 0);
+            scene.add(grassLeftMesh);
+
+            const grassFront = new THREE.PlaneGeometry(30, 8);
+            grassFront.rotateX(-Math.PI / 2);
+            const grassFrontMesh = new THREE.Mesh(grassFront, grassMat.clone());
+            grassFrontMesh.position.set(0, -2.95, 10);
+            scene.add(grassFrontMesh);
+
+            // Small decorative rocks
+            const smallRockGeo = new THREE.DodecahedronGeometry(0.5, 0);
+            for (let i = 0; i < 8; i++) {
+                const rock = new THREE.Mesh(smallRockGeo, rockMat.clone());
+                const angle = (i / 8) * Math.PI * 2;
+                const radius = 7 + Math.random() * 2;
+                rock.position.set(
+                    Math.cos(angle) * radius,
+                    -2.5,
+                    Math.sin(angle) * radius - 2
+                );
+                rock.scale.set(
+                    0.5 + Math.random() * 0.8,
+                    0.4 + Math.random() * 0.5,
+                    0.5 + Math.random() * 0.8
+                );
+                rock.rotation.set(Math.random(), Math.random(), Math.random());
+                scene.add(rock);
+            }
         }
 
         function createRippleUniforms() {
@@ -864,13 +1199,13 @@
             toyGroups.forEach(group => {
                 const pos = group.position;
                 const dist = Math.sqrt((pos.x - wp.x) ** 2 + (pos.z - wp.y) ** 2);
-                if (dist < 2.5 && dist > 0.1) {
+                if (dist < 2.0 && dist > 0.1) {
                     const push = new THREE.Vector2(pos.x - wp.x, pos.z - wp.y).normalize();
-                    group.driftDir.lerp(push, 0.7);
+                    group.driftDir.lerp(push, 0.5);
                     group.driftDir.normalize();
-                    group.driftSpeed = 0.12;
-                    // Add spin from push
-                    group.rotSpeed += (Math.random() - 0.5) * 0.3;
+                    group.driftSpeed = Math.min(group.driftSpeed + 0.03, 0.05);
+                    // Gentle spin from push
+                    group.rotSpeed += (Math.random() - 0.5) * 0.1;
                 }
             });
         }
@@ -948,17 +1283,17 @@
                 group.driftSpeed *= 0.995;
                 if (group.driftSpeed < 0.005) group.driftSpeed = 0.005;
 
-                // Bounce off edges
-                const bounds = 7;
+                // Bounce off edges - gentle
+                const bounds = 6;
                 if (Math.abs(group.position.x) > bounds) {
-                    group.driftDir.x *= -0.8;
+                    group.driftDir.x *= -0.5;
                     group.position.x = Math.sign(group.position.x) * bounds;
-                    group.driftSpeed *= 1.2;
+                    group.driftSpeed *= 0.7;
                 }
                 if (Math.abs(group.position.z) > bounds) {
-                    group.driftDir.y *= -0.8;
+                    group.driftDir.y *= -0.5;
                     group.position.z = Math.sign(group.position.z) * bounds;
-                    group.driftSpeed *= 1.2;
+                    group.driftSpeed *= 0.7;
                 }
 
                 // Rotate
@@ -971,7 +1306,7 @@
                 });
             });
 
-            // Collision detection between toy groups
+            // Collision detection between toy groups - gentle bumping
             for (let i = 0; i < toyGroups.length; i++) {
                 for (let j = i + 1; j < toyGroups.length; j++) {
                     const a = toyGroups[i];
@@ -983,46 +1318,45 @@
                     const minDist = a.radius + b.radius;
 
                     if (dist < minDist && dist > 0.01) {
-                        // Collision! Push apart
+                        // Collision! Gently push apart
                         const overlap = minDist - dist;
                         const nx = dx / dist;
                         const nz = dz / dist;
 
-                        // Move apart
-                        const pushStrength = overlap * 0.5;
+                        // Soft separation
+                        const pushStrength = overlap * 0.3;
                         a.position.x -= nx * pushStrength;
                         a.position.z -= nz * pushStrength;
                         b.position.x += nx * pushStrength;
                         b.position.z += nz * pushStrength;
 
-                        // Bounce velocities
-                        const relVelX = b.driftDir.x * b.driftSpeed - a.driftDir.x * a.driftSpeed;
-                        const relVelZ = b.driftDir.y * b.driftSpeed - a.driftDir.y * a.driftSpeed;
-                        const relVelDotN = relVelX * nx + relVelZ * nz;
+                        // Gentle bounce - exchange direction slightly
+                        const bounce = 0.15;
+                        a.driftDir.x -= nx * bounce;
+                        a.driftDir.y -= nz * bounce;
+                        b.driftDir.x += nx * bounce;
+                        b.driftDir.y += nz * bounce;
 
-                        if (relVelDotN < 0) {
-                            // Bounce
-                            const bounce = 0.6;
-                            a.driftDir.x += nx * bounce;
-                            a.driftDir.y += nz * bounce;
-                            b.driftDir.x -= nx * bounce;
-                            b.driftDir.y -= nz * bounce;
+                        a.driftDir.normalize();
+                        b.driftDir.normalize();
 
-                            a.driftDir.normalize();
-                            b.driftDir.normalize();
+                        // Lose energy on collision (dampen, don't amplify)
+                        a.driftSpeed *= 0.85;
+                        b.driftSpeed *= 0.85;
 
-                            // Transfer some energy
-                            const avgSpeed = (a.driftSpeed + b.driftSpeed) * 0.5;
-                            a.driftSpeed = avgSpeed * 1.1;
-                            b.driftSpeed = avgSpeed * 1.1;
-
-                            // Add spin from collision
-                            a.rotSpeed += (Math.random() - 0.5) * 0.2;
-                            b.rotSpeed += (Math.random() - 0.5) * 0.2;
-                        }
+                        // Tiny spin from collision
+                        a.rotSpeed += (Math.random() - 0.5) * 0.05;
+                        b.rotSpeed += (Math.random() - 0.5) * 0.05;
                     }
                 }
             }
+
+            // Cap speeds and dampen spin
+            toyGroups.forEach(group => {
+                group.driftSpeed = Math.min(group.driftSpeed, 0.06);
+                group.rotSpeed *= 0.98;
+                group.rotSpeed = Math.max(-0.3, Math.min(0.3, group.rotSpeed));
+            });
 
             // Also update ripple uniforms for all toy meshes
             toys.forEach(toy => {
@@ -1042,6 +1376,11 @@
 
             floor.material.uniforms.uTime.value = elapsed;
             water.material.uniforms.uTime.value = elapsed;
+
+            // Animate waterfall
+            if (window.waterfallMesh) {
+                window.waterfallMesh.material.uniforms.uTime.value = elapsed;
+            }
 
             renderer.render(scene, camera);
         }
