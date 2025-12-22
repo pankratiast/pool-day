@@ -1457,7 +1457,7 @@
             const group = new THREE.Group();
 
             // Tall trunk with segments
-            const trunkHeight = 8;
+            const trunkHeight = 5;
             const segments = 12;
             for (let i = 0; i < segments; i++) {
                 const segmentHeight = trunkHeight / segments;
@@ -1540,6 +1540,11 @@
 
             group.position.set(palmX, deckY - 0.5, palmZ);
             scene.add(group);
+
+            // Create symmetrical palm tree on top left
+            const group2 = group.clone();
+            group2.position.set(-palmX, deckY - 0.5, palmZ);
+            scene.add(group2);
         }
 
         // ============================================================
