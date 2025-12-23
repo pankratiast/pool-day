@@ -695,6 +695,7 @@
 
             createBackdrop();
             createPoolEdges();
+            createMurals();
             createFloor();
             createWater();
             createGazebo();
@@ -1291,6 +1292,265 @@
                 branch.rotation.z = Math.cos(branchAngle) * 0.6;
                 scene.add(branch);
             }
+        }
+
+        // ============================================================
+        // MARBLE TILE MURALS (left: Roman red/white, right: Greek blue/white)
+        // ============================================================
+        function createMurals() {
+            const poolWidth = 16;
+            const poolLength = 20;
+            const deckY = -CONFIG.waterDepth + 0.8;
+
+            // ---- LEFT MURAL: Roman inspired, red and white ----
+            const leftCanvas = document.createElement('canvas');
+            leftCanvas.width = 512;
+            leftCanvas.height = 512;
+            const leftCtx = leftCanvas.getContext('2d');
+
+            // White marble background
+            leftCtx.fillStyle = '#F5F0E8';
+            leftCtx.fillRect(0, 0, 512, 512);
+
+            // Add marble texture noise
+            for (let i = 0; i < 2000; i++) {
+                leftCtx.fillStyle = `rgba(200, 180, 170, ${Math.random() * 0.15})`;
+                leftCtx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+            }
+
+            // Roman red border pattern
+            leftCtx.strokeStyle = '#8B2323';
+            leftCtx.lineWidth = 20;
+            leftCtx.strokeRect(25, 25, 462, 462);
+
+            // Inner gold/ochre border
+            leftCtx.strokeStyle = '#CD853F';
+            leftCtx.lineWidth = 8;
+            leftCtx.strokeRect(50, 50, 412, 412);
+
+            // Roman meander/Greek key pattern in red
+            leftCtx.fillStyle = '#A52A2A';
+            const keySize = 30;
+            for (let i = 0; i < 12; i++) {
+                const x = 70 + i * 32;
+                leftCtx.fillRect(x, 70, keySize, 8);
+                leftCtx.fillRect(x, 70, 8, keySize);
+                leftCtx.fillRect(x + 22, 78, 8, keySize - 8);
+                // Bottom mirror
+                leftCtx.fillRect(x, 434, keySize, 8);
+                leftCtx.fillRect(x + 22, 412, 8, keySize);
+                leftCtx.fillRect(x, 412, 8, keySize - 8);
+            }
+
+            // Central Roman mosaic - laurel wreath
+            leftCtx.strokeStyle = '#228B22';
+            leftCtx.lineWidth = 4;
+            leftCtx.beginPath();
+            leftCtx.arc(256, 256, 100, 0, Math.PI * 2);
+            leftCtx.stroke();
+
+            // Laurel leaves
+            leftCtx.fillStyle = '#2E8B2E';
+            for (let i = 0; i < 24; i++) {
+                const angle = (i / 24) * Math.PI * 2;
+                const lx = 256 + Math.cos(angle) * 100;
+                const ly = 256 + Math.sin(angle) * 100;
+                leftCtx.save();
+                leftCtx.translate(lx, ly);
+                leftCtx.rotate(angle + Math.PI / 2);
+                leftCtx.beginPath();
+                leftCtx.ellipse(0, 0, 6, 18, 0, 0, Math.PI * 2);
+                leftCtx.fill();
+                leftCtx.restore();
+            }
+
+            // SPQR text in center
+            leftCtx.fillStyle = '#8B0000';
+            leftCtx.font = 'bold 48px "Times New Roman", serif';
+            leftCtx.textAlign = 'center';
+            leftCtx.textBaseline = 'middle';
+            leftCtx.fillText('SPQR', 256, 256);
+
+            // Corner rosettes
+            const drawRosette = (cx, cy, color) => {
+                leftCtx.fillStyle = color;
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    leftCtx.beginPath();
+                    leftCtx.ellipse(
+                        cx + Math.cos(angle) * 15,
+                        cy + Math.sin(angle) * 15,
+                        8, 4, angle, 0, Math.PI * 2
+                    );
+                    leftCtx.fill();
+                }
+                leftCtx.beginPath();
+                leftCtx.arc(cx, cy, 8, 0, Math.PI * 2);
+                leftCtx.fill();
+            };
+            drawRosette(100, 100, '#CD5C5C');
+            drawRosette(412, 100, '#CD5C5C');
+            drawRosette(100, 412, '#CD5C5C');
+            drawRosette(412, 412, '#CD5C5C');
+
+            const leftTexture = new THREE.CanvasTexture(leftCanvas);
+            const leftMuralMat = new THREE.MeshStandardMaterial({
+                map: leftTexture,
+                roughness: 0.4,
+                metalness: 0.1
+            });
+
+            // Left mural panel with marble frame
+            const leftPanel = new THREE.BoxGeometry(0.3, 6, 8);
+            const leftMural = new THREE.Mesh(leftPanel, leftMuralMat);
+            leftMural.position.set(-poolWidth / 2 - 4, deckY + 3, -2);
+            scene.add(leftMural);
+
+            // Marble frame for left mural
+            const frameMat = new THREE.MeshStandardMaterial({
+                color: 0xF5F5F5,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+            const frameTop = new THREE.BoxGeometry(0.5, 0.4, 8.6);
+            const frameTopMesh = new THREE.Mesh(frameTop, frameMat);
+            frameTopMesh.position.set(-poolWidth / 2 - 4, deckY + 6.2, -2);
+            scene.add(frameTopMesh);
+            const frameBottom = new THREE.Mesh(frameTop.clone(), frameMat.clone());
+            frameBottom.position.set(-poolWidth / 2 - 4, deckY - 0.2, -2);
+            scene.add(frameBottom);
+
+            // ---- RIGHT MURAL: Greek inspired, blue and white ----
+            const rightCanvas = document.createElement('canvas');
+            rightCanvas.width = 512;
+            rightCanvas.height = 512;
+            const rightCtx = rightCanvas.getContext('2d');
+
+            // White marble background
+            rightCtx.fillStyle = '#F8F8FF';
+            rightCtx.fillRect(0, 0, 512, 512);
+
+            // Marble veining
+            for (let i = 0; i < 1500; i++) {
+                rightCtx.fillStyle = `rgba(180, 190, 210, ${Math.random() * 0.12})`;
+                rightCtx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+            }
+
+            // Blue Greek key border
+            rightCtx.strokeStyle = '#1E3A5F';
+            rightCtx.lineWidth = 16;
+            rightCtx.strokeRect(20, 20, 472, 472);
+
+            // Greek wave pattern (top and bottom)
+            rightCtx.strokeStyle = '#2E5A88';
+            rightCtx.lineWidth = 4;
+            for (let i = 0; i < 8; i++) {
+                const x = 50 + i * 55;
+                // Top wave
+                rightCtx.beginPath();
+                rightCtx.arc(x, 55, 20, Math.PI, 0, false);
+                rightCtx.arc(x + 27, 55, 20, Math.PI, 0, true);
+                rightCtx.stroke();
+                // Bottom wave
+                rightCtx.beginPath();
+                rightCtx.arc(x, 457, 20, 0, Math.PI, false);
+                rightCtx.arc(x + 27, 457, 20, 0, Math.PI, true);
+                rightCtx.stroke();
+            }
+
+            // Central Greek amphora/vase
+            rightCtx.fillStyle = '#1E4D7B';
+            rightCtx.beginPath();
+            // Vase body
+            rightCtx.moveTo(206, 350);
+            rightCtx.quadraticCurveTo(180, 280, 200, 220);
+            rightCtx.quadraticCurveTo(220, 180, 256, 170);
+            rightCtx.quadraticCurveTo(292, 180, 312, 220);
+            rightCtx.quadraticCurveTo(332, 280, 306, 350);
+            rightCtx.lineTo(206, 350);
+            rightCtx.fill();
+
+            // Vase neck
+            rightCtx.fillRect(230, 140, 52, 35);
+
+            // Vase rim
+            rightCtx.fillStyle = '#2E6A9E';
+            rightCtx.fillRect(220, 130, 72, 15);
+
+            // Vase base
+            rightCtx.fillRect(215, 350, 82, 12);
+            rightCtx.fillRect(225, 362, 62, 8);
+
+            // Handles
+            rightCtx.strokeStyle = '#1E4D7B';
+            rightCtx.lineWidth = 10;
+            rightCtx.beginPath();
+            rightCtx.arc(185, 220, 30, -0.5, 1.5, false);
+            rightCtx.stroke();
+            rightCtx.beginPath();
+            rightCtx.arc(327, 220, 30, 1.6, 3.6, false);
+            rightCtx.stroke();
+
+            // Decorative pattern on vase (white figures)
+            rightCtx.fillStyle = '#F0F0F0';
+            rightCtx.beginPath();
+            rightCtx.arc(256, 260, 35, 0, Math.PI * 2);
+            rightCtx.fill();
+
+            // Olive branches around
+            rightCtx.strokeStyle = '#3D7A4A';
+            rightCtx.lineWidth = 2;
+            for (let side = -1; side <= 1; side += 2) {
+                const bx = 256 + side * 120;
+                rightCtx.beginPath();
+                rightCtx.moveTo(bx, 150);
+                rightCtx.quadraticCurveTo(bx + side * 20, 256, bx, 370);
+                rightCtx.stroke();
+
+                // Olive leaves
+                rightCtx.fillStyle = '#4A8B5A';
+                for (let j = 0; j < 8; j++) {
+                    const ly = 170 + j * 28;
+                    rightCtx.beginPath();
+                    rightCtx.ellipse(bx + side * 8, ly, 5, 12, side * 0.3, 0, Math.PI * 2);
+                    rightCtx.fill();
+                }
+            }
+
+            // Corner palmettes
+            const drawPalmette = (cx, cy) => {
+                rightCtx.fillStyle = '#1E4D7B';
+                for (let i = -2; i <= 2; i++) {
+                    rightCtx.beginPath();
+                    rightCtx.ellipse(cx + i * 10, cy, 4, 20, i * 0.2, 0, Math.PI * 2);
+                    rightCtx.fill();
+                }
+            };
+            drawPalmette(100, 100);
+            drawPalmette(412, 100);
+            drawPalmette(100, 412);
+            drawPalmette(412, 412);
+
+            const rightTexture = new THREE.CanvasTexture(rightCanvas);
+            const rightMuralMat = new THREE.MeshStandardMaterial({
+                map: rightTexture,
+                roughness: 0.4,
+                metalness: 0.1
+            });
+
+            // Right mural panel
+            const rightPanel = new THREE.BoxGeometry(0.3, 6, 8);
+            const rightMural = new THREE.Mesh(rightPanel, rightMuralMat);
+            rightMural.position.set(poolWidth / 2 + 4, deckY + 3, -2);
+            scene.add(rightMural);
+
+            // Marble frame for right mural
+            const frameTopRight = new THREE.Mesh(frameTop.clone(), frameMat.clone());
+            frameTopRight.position.set(poolWidth / 2 + 4, deckY + 6.2, -2);
+            scene.add(frameTopRight);
+            const frameBottomRight = new THREE.Mesh(frameTop.clone(), frameMat.clone());
+            frameBottomRight.position.set(poolWidth / 2 + 4, deckY - 0.2, -2);
+            scene.add(frameBottomRight);
         }
 
         // ============================================================
