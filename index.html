@@ -1091,7 +1091,7 @@
             step4.position.set(9, -0.5, -14);
             scene.add(step4);
 
-            // Waterfall - positioned on the back cliff
+            // Waterfall - TRIPLED width, centered on back cliff
             const waterfallMat = new THREE.ShaderMaterial({
                 uniforms: { uTime: { value: 0 } },
                 vertexShader: waterfallVS,
@@ -1099,37 +1099,38 @@
                 transparent: true
             });
 
-            const waterfallGeo = new THREE.PlaneGeometry(6, 12);
+            const waterfallGeo = new THREE.PlaneGeometry(18, 12);  // Tripled from 6 to 18
             const waterfall = new THREE.Mesh(waterfallGeo, waterfallMat);
-            waterfall.position.set(-3, 4, -15.4);
+            waterfall.position.set(0, 4, -15.4);  // Centered
             scene.add(waterfall);
 
             // Store waterfall for animation
             window.waterfallMesh = waterfall;
 
-            // Splash pool at base of waterfall
-            const splashGeo = new THREE.CircleGeometry(3, 16);
+            // Splash pool at base of waterfall - wider to match
+            const splashGeo = new THREE.CapsuleGeometry(3, 12, 8, 16);
             splashGeo.rotateX(-Math.PI / 2);
+            splashGeo.rotateZ(Math.PI / 2);
             const splashMat = new THREE.MeshBasicMaterial({
                 color: 0x6BBED9,
                 transparent: true,
                 opacity: 0.6
             });
             const splash = new THREE.Mesh(splashGeo, splashMat);
-            splash.position.set(-3, -2.9, -13);
+            splash.position.set(0, -2.85, -13);
             scene.add(splash);
 
-            // Grass areas - front and back of pool
+            // Grass areas - front and back of pool (EXTENDED further south)
             const grassMat = new THREE.ShaderMaterial({
                 vertexShader: rockVS,
                 fragmentShader: grassFS
             });
 
-            // Front grass area
-            const grassFront = new THREE.PlaneGeometry(50, 20);
+            // Front grass area - extended much further south
+            const grassFront = new THREE.PlaneGeometry(80, 50);
             grassFront.rotateX(-Math.PI / 2);
             const grassFrontMesh = new THREE.Mesh(grassFront, grassMat.clone());
-            grassFrontMesh.position.set(0, -2.95, 22);
+            grassFrontMesh.position.set(0, -2.95, 35);
             scene.add(grassFrontMesh);
 
             // Back grass (between pool and cliffs)
@@ -1138,6 +1139,201 @@
             const grassBackMesh = new THREE.Mesh(grassBack, grassMat.clone());
             grassBackMesh.position.set(0, -2.95, -17);
             scene.add(grassBackMesh);
+
+            // ============================================================
+            // GROTTO CAVE (back left) with hanging vines
+            // ============================================================
+            const grottoX = -15;
+            const grottoZ = -14;
+            const grottoY = -1;
+
+            // Dark cave interior
+            const caveMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
+            const caveInterior = new THREE.SphereGeometry(4, 16, 12, 0, Math.PI, 0, Math.PI);
+            caveInterior.rotateX(-Math.PI / 2);
+            const caveInteriorMesh = new THREE.Mesh(caveInterior, caveMat);
+            caveInteriorMesh.position.set(grottoX, grottoY + 1, grottoZ - 2);
+            scene.add(caveInteriorMesh);
+
+            // Rock archway around cave entrance
+            const archMat = rockMat.clone();
+
+            // Left rock pillar
+            const leftPillar = new THREE.BoxGeometry(2.5, 5, 3);
+            const leftPillarMesh = new THREE.Mesh(leftPillar, archMat.clone());
+            leftPillarMesh.position.set(grottoX - 3, grottoY + 1.5, grottoZ);
+            scene.add(leftPillarMesh);
+
+            // Right rock pillar
+            const rightPillar = new THREE.BoxGeometry(2.5, 5, 3);
+            const rightPillarMesh = new THREE.Mesh(rightPillar, archMat.clone());
+            rightPillarMesh.position.set(grottoX + 3, grottoY + 1.5, grottoZ);
+            scene.add(rightPillarMesh);
+
+            // Top arch rock
+            const topArch = new THREE.BoxGeometry(8, 2.5, 3);
+            const topArchMesh = new THREE.Mesh(topArch, archMat.clone());
+            topArchMesh.position.set(grottoX, grottoY + 4.5, grottoZ);
+            scene.add(topArchMesh);
+
+            // Irregular rocks around entrance
+            const rock1 = new THREE.DodecahedronGeometry(1.2);
+            const rock1Mesh = new THREE.Mesh(rock1, archMat.clone());
+            rock1Mesh.position.set(grottoX - 4, grottoY + 4, grottoZ + 0.5);
+            scene.add(rock1Mesh);
+
+            const rock2 = new THREE.DodecahedronGeometry(0.9);
+            const rock2Mesh = new THREE.Mesh(rock2, archMat.clone());
+            rock2Mesh.position.set(grottoX + 3.5, grottoY + 5, grottoZ + 0.3);
+            scene.add(rock2Mesh);
+
+            // Hanging vines over entrance
+            const vineMat = new THREE.MeshStandardMaterial({
+                color: 0x2d5a27,
+                roughness: 0.8,
+                side: THREE.DoubleSide
+            });
+
+            for (let i = 0; i < 12; i++) {
+                const vineX = grottoX - 3 + Math.random() * 6;
+                const vineLength = 1.5 + Math.random() * 2.5;
+                const vineGeo = new THREE.CylinderGeometry(0.03, 0.02, vineLength, 6);
+                const vine = new THREE.Mesh(vineGeo, vineMat.clone());
+                vine.position.set(vineX, grottoY + 4.5 - vineLength / 2, grottoZ + 1);
+                // Slight random rotation for natural look
+                vine.rotation.x = (Math.random() - 0.5) * 0.3;
+                vine.rotation.z = (Math.random() - 0.5) * 0.2;
+                scene.add(vine);
+
+                // Leaf clusters on vines
+                for (let j = 0; j < 3; j++) {
+                    const leafGeo = new THREE.SphereGeometry(0.12, 6, 4);
+                    leafGeo.scale(1, 0.5, 1);
+                    const leaf = new THREE.Mesh(leafGeo, vineMat.clone());
+                    leaf.position.set(
+                        vineX + (Math.random() - 0.5) * 0.2,
+                        grottoY + 4.5 - vineLength * (0.3 + j * 0.25),
+                        grottoZ + 1 + Math.random() * 0.15
+                    );
+                    scene.add(leaf);
+                }
+            }
+
+            // ============================================================
+            // ANCIENT REDWOOD TREE (back right) with face
+            // ============================================================
+            const treeX = 14;
+            const treeZ = -13;
+            const treeY = -3;
+
+            // Massive trunk
+            const barkMat = new THREE.MeshStandardMaterial({
+                color: 0x4a3728,
+                roughness: 0.95,
+                metalness: 0.0
+            });
+
+            // Main trunk - very thick base tapering up
+            const trunkGeo = new THREE.CylinderGeometry(1.5, 3.5, 12, 16);
+            const trunk = new THREE.Mesh(trunkGeo, barkMat);
+            trunk.position.set(treeX, treeY + 6, treeZ);
+            scene.add(trunk);
+
+            // Buttress roots spreading out
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const rootGeo = new THREE.ConeGeometry(1.2, 4, 8);
+                rootGeo.rotateX(Math.PI / 2 + 0.6);
+                rootGeo.rotateY(angle);
+                const root = new THREE.Mesh(rootGeo, barkMat.clone());
+                root.position.set(
+                    treeX + Math.cos(angle) * 2.5,
+                    treeY + 0.5,
+                    treeZ + Math.sin(angle) * 2.5
+                );
+                scene.add(root);
+            }
+
+            // Moss patches on trunk (green-brown material)
+            const mossMat = new THREE.MeshStandardMaterial({
+                color: 0x3d5c3a,
+                roughness: 0.9
+            });
+
+            for (let i = 0; i < 8; i++) {
+                const mossGeo = new THREE.SphereGeometry(0.4 + Math.random() * 0.5, 8, 6);
+                mossGeo.scale(1.5, 0.3, 1);
+                const moss = new THREE.Mesh(mossGeo, mossMat.clone());
+                const mossAngle = Math.random() * Math.PI * 2;
+                const mossHeight = treeY + 2 + Math.random() * 8;
+                const trunkRadius = 3.5 - (mossHeight - treeY) * 0.17;
+                moss.position.set(
+                    treeX + Math.cos(mossAngle) * (trunkRadius + 0.1),
+                    mossHeight,
+                    treeZ + Math.sin(mossAngle) * (trunkRadius + 0.1)
+                );
+                moss.lookAt(treeX, mossHeight, treeZ);
+                scene.add(moss);
+            }
+
+            // FACE IN THE TREE - hollow eyes and mouth
+            const holeMat = new THREE.MeshBasicMaterial({ color: 0x1a1008 });
+
+            // Left eye - hollow knothole
+            const leftEyeGeo = new THREE.CircleGeometry(0.35, 12);
+            const leftEye = new THREE.Mesh(leftEyeGeo, holeMat);
+            leftEye.position.set(treeX - 0.7, treeY + 6.5, treeZ + 2.8);
+            leftEye.lookAt(treeX - 0.7, treeY + 6.5, treeZ + 10);
+            scene.add(leftEye);
+
+            // Right eye
+            const rightEyeGeo = new THREE.CircleGeometry(0.4, 12);
+            const rightEye = new THREE.Mesh(rightEyeGeo, holeMat);
+            rightEye.position.set(treeX + 0.8, treeY + 6.2, treeZ + 2.75);
+            rightEye.lookAt(treeX + 0.8, treeY + 6.2, treeZ + 10);
+            scene.add(rightEye);
+
+            // Mouth - elongated oval hole
+            const mouthGeo = new THREE.CircleGeometry(0.5, 12);
+            mouthGeo.scale(1.8, 0.8, 1);
+            const mouth = new THREE.Mesh(mouthGeo, holeMat);
+            mouth.position.set(treeX + 0.1, treeY + 4.5, treeZ + 3.2);
+            mouth.lookAt(treeX + 0.1, treeY + 4.5, treeZ + 10);
+            scene.add(mouth);
+
+            // Bark ridges around eyes (like eyebrows/wrinkles)
+            const ridgeMat = barkMat.clone();
+            ridgeMat.color.setHex(0x3d2b1f);
+
+            const leftBrowGeo = new THREE.TorusGeometry(0.5, 0.1, 6, 12, Math.PI);
+            const leftBrow = new THREE.Mesh(leftBrowGeo, ridgeMat);
+            leftBrow.position.set(treeX - 0.7, treeY + 7.1, treeZ + 2.7);
+            leftBrow.rotation.x = -0.3;
+            leftBrow.rotation.z = 0.2;
+            scene.add(leftBrow);
+
+            const rightBrowGeo = new THREE.TorusGeometry(0.55, 0.1, 6, 12, Math.PI);
+            const rightBrow = new THREE.Mesh(rightBrowGeo, ridgeMat);
+            rightBrow.position.set(treeX + 0.8, treeY + 6.8, treeZ + 2.65);
+            rightBrow.rotation.x = -0.3;
+            rightBrow.rotation.z = -0.15;
+            scene.add(rightBrow);
+
+            // Branches at top
+            const branchMat = barkMat.clone();
+            for (let i = 0; i < 5; i++) {
+                const branchAngle = (i / 5) * Math.PI * 2 + Math.random() * 0.5;
+                const branchGeo = new THREE.CylinderGeometry(0.15, 0.4, 4, 8);
+                const branch = new THREE.Mesh(branchGeo, branchMat.clone());
+                branch.position.set(
+                    treeX + Math.cos(branchAngle) * 1.2,
+                    treeY + 11 + Math.random(),
+                    treeZ + Math.sin(branchAngle) * 1.2
+                );
+                branch.rotation.x = (Math.random() - 0.5) * 0.8;
+                branch.rotation.z = Math.cos(branchAngle) * 0.6;
+                scene.add(branch);
+            }
         }
 
         // ============================================================
