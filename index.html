@@ -1220,10 +1220,10 @@
             }
 
             // ============================================================
-            // ANCIENT REDWOOD TREE (back right) with face
+            // ANCIENT REDWOOD TREE (far back right corner)
             // ============================================================
-            const treeX = 14;
-            const treeZ = -13;
+            const treeX = 22;   // Far right, past the back wall
+            const treeZ = -20;  // Far back
             const treeY = -3;
 
             // Massive trunk
@@ -1275,49 +1275,6 @@
                 moss.lookAt(treeX, mossHeight, treeZ);
                 scene.add(moss);
             }
-
-            // FACE IN THE TREE - hollow eyes and mouth
-            const holeMat = new THREE.MeshBasicMaterial({ color: 0x1a1008 });
-
-            // Left eye - hollow knothole
-            const leftEyeGeo = new THREE.CircleGeometry(0.35, 12);
-            const leftEye = new THREE.Mesh(leftEyeGeo, holeMat);
-            leftEye.position.set(treeX - 0.7, treeY + 6.5, treeZ + 2.8);
-            leftEye.lookAt(treeX - 0.7, treeY + 6.5, treeZ + 10);
-            scene.add(leftEye);
-
-            // Right eye
-            const rightEyeGeo = new THREE.CircleGeometry(0.4, 12);
-            const rightEye = new THREE.Mesh(rightEyeGeo, holeMat);
-            rightEye.position.set(treeX + 0.8, treeY + 6.2, treeZ + 2.75);
-            rightEye.lookAt(treeX + 0.8, treeY + 6.2, treeZ + 10);
-            scene.add(rightEye);
-
-            // Mouth - elongated oval hole
-            const mouthGeo = new THREE.CircleGeometry(0.5, 12);
-            mouthGeo.scale(1.8, 0.8, 1);
-            const mouth = new THREE.Mesh(mouthGeo, holeMat);
-            mouth.position.set(treeX + 0.1, treeY + 4.5, treeZ + 3.2);
-            mouth.lookAt(treeX + 0.1, treeY + 4.5, treeZ + 10);
-            scene.add(mouth);
-
-            // Bark ridges around eyes (like eyebrows/wrinkles)
-            const ridgeMat = barkMat.clone();
-            ridgeMat.color.setHex(0x3d2b1f);
-
-            const leftBrowGeo = new THREE.TorusGeometry(0.5, 0.1, 6, 12, Math.PI);
-            const leftBrow = new THREE.Mesh(leftBrowGeo, ridgeMat);
-            leftBrow.position.set(treeX - 0.7, treeY + 7.1, treeZ + 2.7);
-            leftBrow.rotation.x = -0.3;
-            leftBrow.rotation.z = 0.2;
-            scene.add(leftBrow);
-
-            const rightBrowGeo = new THREE.TorusGeometry(0.55, 0.1, 6, 12, Math.PI);
-            const rightBrow = new THREE.Mesh(rightBrowGeo, ridgeMat);
-            rightBrow.position.set(treeX + 0.8, treeY + 6.8, treeZ + 2.65);
-            rightBrow.rotation.x = -0.3;
-            rightBrow.rotation.z = -0.15;
-            scene.add(rightBrow);
 
             // Branches at top
             const branchMat = barkMat.clone();
@@ -1696,10 +1653,11 @@
             }
 
             // Place potted plants near the gazebo
-            createPottedPlant(-2.5, gazeboZ + 2, 'bush');
-            createPottedPlant(2.5, gazeboZ + 2, 'fern');
-            createPottedPlant(-3.5, gazeboZ + 0.5, 'flowering');
-            createPottedPlant(3.5, gazeboZ + 0.5, 'bush');
+            // Plants spread wider from gazebo center
+            createPottedPlant(-5.5, gazeboZ + 2, 'bush');
+            createPottedPlant(5.5, gazeboZ + 2, 'fern');
+            createPottedPlant(-7, gazeboZ + 0.5, 'flowering');
+            createPottedPlant(7, gazeboZ + 0.5, 'bush');
         }
 
         // ============================================================
