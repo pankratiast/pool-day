@@ -196,6 +196,12 @@
         import * as THREE from 'three';
 
         // ============================================================
+        // MOBILE DETECTION
+        // ============================================================
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+            || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+
+        // ============================================================
         // CONFIG - Deeper blue like reference image
         // ============================================================
         const CONFIG = {
@@ -220,6 +226,14 @@
         // ============================================================
         const ripples = [];
         const MAX_RIPPLES = CONFIG.maxRipples;
+
+        // Pre-allocate Vector2 arrays to avoid GC pressure
+        const ripplePositionsCache = [];
+        const rippleParamsCache = [];
+        for (let i = 0; i < MAX_RIPPLES; i++) {
+            ripplePositionsCache.push(new THREE.Vector2(0, 0));
+            rippleParamsCache.push(new THREE.Vector2(-1, 0));
+        }
 
         function addRipple(x, z, strength = CONFIG.rippleStrength) {
             ripples.push({ x, z, time: 0, strength });
@@ -653,6 +667,12 @@
         let rainGeometry = null;
         let dirLight = null;
 
+        // Interactive elements
+        let palmTrees = [];
+        let fallingCoconuts = [];
+        let divingBoard = null;
+        let divingBoardBobble = { active: false, time: 0, originalY: 0 };
+
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x075985);
@@ -661,9 +681,11 @@
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
             updateCameraPOV(15);  // Default: 1-2 o'clock position
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // Disable anti-aliasing on mobile for performance
+            renderer = new THREE.WebGLRenderer({ antialias: !isMobile });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            // Lower pixel ratio on mobile (1 vs 2) for major performance boost
+            renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
             document.body.appendChild(renderer.domElement);
 
             clock = new THREE.Clock();
@@ -803,6 +825,31 @@
 
                 vec3 col = mix(rockColor1, rockColor2, n);
                 col = mix(col, rockColor3, noise(vWorldPos.yz * 3.0) * 0.4);
+
+                // Moss - grows on horizontal/upward-facing surfaces
+                vec3 mossColor1 = vec3(0.15, 0.35, 0.12);
+                vec3 mossColor2 = vec3(0.2, 0.45, 0.15);
+                float mossNoise = noise(vWorldPos.xz * 3.0) * noise(vWorldPos.xz * 7.0 + 5.0);
+                float mossMask = smoothstep(0.3, 0.7, vNormal.y) * smoothstep(0.2, 0.5, mossNoise);
+                // More moss in crevices and lower areas
+                mossMask *= smoothstep(-2.0, 5.0, vWorldPos.y);
+                vec3 mossCol = mix(mossColor1, mossColor2, noise(vWorldPos.xz * 12.0));
+                col = mix(col, mossCol, mossMask * 0.8);
+
+                // Lichen - patchy circular growths, prefer vertical surfaces
+                vec3 lichenColor1 = vec3(0.6, 0.65, 0.4);  // Yellow-green
+                vec3 lichenColor2 = vec3(0.5, 0.55, 0.5);  // Gray-green
+                vec3 lichenColor3 = vec3(0.7, 0.5, 0.3);   // Orange lichen
+                float lichenNoise1 = noise(vWorldPos.xy * 5.0);
+                float lichenNoise2 = noise(vWorldPos.yz * 6.0 + 10.0);
+                float lichenNoise3 = noise(vWorldPos.xz * 4.0 + 20.0);
+                // Create patchy circular patterns
+                float lichen1 = smoothstep(0.65, 0.75, lichenNoise1) * (1.0 - abs(vNormal.y) * 0.5);
+                float lichen2 = smoothstep(0.7, 0.8, lichenNoise2) * (1.0 - abs(vNormal.y) * 0.3);
+                float lichen3 = smoothstep(0.72, 0.82, lichenNoise3);
+                col = mix(col, lichenColor1, lichen1 * 0.6);
+                col = mix(col, lichenColor2, lichen2 * 0.5);
+                col = mix(col, lichenColor3, lichen3 * 0.4);
 
                 col *= diff;
 
@@ -1273,6 +1320,44 @@
             ringMesh.position.set(0, gazeboY + 4.1, gazeboZ);
             scene.add(ringMesh);
 
+            // Add Japanese lettering "カロス・カガトス" (Kalos Kagathos) on front frieze
+            const textCanvas = document.createElement('canvas');
+            textCanvas.width = 512;
+            textCanvas.height = 64;
+            const ctx = textCanvas.getContext('2d');
+
+            // Semi-transparent marble background
+            ctx.fillStyle = 'rgba(245, 245, 245, 0.9)';
+            ctx.fillRect(0, 0, 512, 64);
+
+            // Gold/bronze text
+            ctx.fillStyle = '#8B7355';
+            ctx.font = 'bold 36px "Hiragino Kaku Gothic Pro", "Yu Gothic", "Meiryo", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('カロス・カガトス', 256, 32);
+
+            // Add subtle shadow/engraving effect
+            ctx.strokeStyle = '#6B5344';
+            ctx.lineWidth = 0.5;
+            ctx.strokeText('カロス・カガトス', 256, 32);
+
+            const textTexture = new THREE.CanvasTexture(textCanvas);
+            textTexture.needsUpdate = true;
+
+            const textMat = new THREE.MeshBasicMaterial({
+                map: textTexture,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+
+            // Create curved frieze panel for the text (arc facing camera)
+            const friezeGeo = new THREE.CylinderGeometry(2.7, 2.7, 0.4, 32, 1, true, Math.PI * 0.7, Math.PI * 0.6);
+            const frieze = new THREE.Mesh(friezeGeo, textMat);
+            frieze.position.set(0, gazeboY + 3.7, gazeboZ);
+            frieze.rotation.y = Math.PI; // Face toward camera
+            scene.add(frieze);
+
             // Domed roof
             const domeGeo = new THREE.SphereGeometry(2.8, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
             const domeMesh = new THREE.Mesh(domeGeo, marbleMat.clone());
@@ -1530,21 +1615,47 @@
                 [0.1, trunkHeight - 0.2, -0.25],
                 [-0.15, trunkHeight - 0.5, -0.15]
             ];
+            const coconuts = [];
             coconutPositions.forEach(pos => {
                 const coconutGeo = new THREE.SphereGeometry(0.2, 12, 10);
                 coconutGeo.scale(1, 1.2, 1);
-                const coconut = new THREE.Mesh(coconutGeo, coconutMat);
+                const coconut = new THREE.Mesh(coconutGeo, coconutMat.clone());
                 coconut.position.set(pos[0], pos[1], pos[2]);
+                coconut.userData.isCoconut = true;
+                coconuts.push(coconut);
                 group.add(coconut);
             });
 
             group.position.set(palmX, deckY - 0.5, palmZ);
+            group.userData.isPalmTree = true;
+            group.userData.coconuts = coconuts;
+            group.userData.groundY = deckY;
             scene.add(group);
+            palmTrees.push(group);
 
-            // Create symmetrical palm tree on top left
-            const group2 = group.clone();
+            // Create symmetrical palm tree on top left - need to recreate coconuts for independent drops
+            const group2 = new THREE.Group();
+            group.children.forEach(child => {
+                if (!child.userData.isCoconut) {
+                    group2.add(child.clone());
+                }
+            });
+            const coconuts2 = [];
+            coconutPositions.forEach(pos => {
+                const coconutGeo = new THREE.SphereGeometry(0.2, 12, 10);
+                coconutGeo.scale(1, 1.2, 1);
+                const coconut = new THREE.Mesh(coconutGeo, coconutMat.clone());
+                coconut.position.set(pos[0], pos[1], pos[2]);
+                coconut.userData.isCoconut = true;
+                coconuts2.push(coconut);
+                group2.add(coconut);
+            });
             group2.position.set(-palmX, deckY - 0.5, palmZ);
+            group2.userData.isPalmTree = true;
+            group2.userData.coconuts = coconuts2;
+            group2.userData.groundY = deckY;
             scene.add(group2);
+            palmTrees.push(group2);
         }
 
         // ============================================================
@@ -1832,6 +1943,9 @@
             const boardGeo = new THREE.BoxGeometry(3.5, 0.12, 0.7);
             const board = new THREE.Mesh(boardGeo, whiteMat.clone());
             board.position.set(boardX + 1.2, deckY + 2.0, boardZ);
+            board.userData.isDivingBoard = true;
+            divingBoard = board;
+            divingBoardBobble.originalY = deckY + 2.0;
             scene.add(board);
 
             // Non-slip surface texture (subtle ridges)
@@ -1987,7 +2101,8 @@
         // RAIN SYSTEM
         // ============================================================
         function createRain() {
-            const rainCount = 3000;
+            // Fewer rain particles on mobile
+            const rainCount = isMobile ? 1000 : 3000;
             rainGeometry = new THREE.BufferGeometry();
             const positions = new Float32Array(rainCount * 3);
             const velocities = new Float32Array(rainCount);
@@ -2094,7 +2209,9 @@
         }
 
         function createWater() {
-            const geo = new THREE.PlaneGeometry(16, 20, 64, 80);
+            // Lower resolution on mobile: 32x40 vs 64x80 (4x fewer vertices)
+            const segments = isMobile ? [32, 40] : [64, 80];
+            const geo = new THREE.PlaneGeometry(16, 20, segments[0], segments[1]);
             geo.rotateX(-Math.PI / 2);
 
             const mat = new THREE.ShaderMaterial({
@@ -2344,6 +2461,7 @@
 
             isMouseDown = true;
             cursorEl.classList.add('active');
+            checkInteractiveClick(e.clientX, e.clientY);
             const wp = screenToWorld(e.clientX, e.clientY);
             if (wp) {
                 addRipple(wp.x, wp.y, CONFIG.rippleStrength * 2);
@@ -2375,6 +2493,116 @@
             });
         }
 
+        // Check for clicks on interactive objects (palm trees, diving board)
+        function checkInteractiveClick(clientX, clientY) {
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            // Check palm trees
+            palmTrees.forEach(palm => {
+                const intersects = raycaster.intersectObjects(palm.children, true);
+                if (intersects.length > 0) {
+                    // Drop a random coconut from this palm
+                    dropCoconut(palm);
+                }
+            });
+
+            // Check diving board
+            if (divingBoard) {
+                const intersects = raycaster.intersectObject(divingBoard);
+                if (intersects.length > 0) {
+                    // Start bobble animation
+                    divingBoardBobble.active = true;
+                    divingBoardBobble.time = 0;
+                }
+            }
+        }
+
+        // Drop a coconut from a palm tree
+        function dropCoconut(palm) {
+            const coconuts = palm.userData.coconuts;
+            if (!coconuts || coconuts.length === 0) return;
+
+            // Pick a random coconut that's still attached
+            const attachedCoconuts = coconuts.filter(c => c.parent === palm);
+            if (attachedCoconuts.length === 0) return;
+
+            const coconut = attachedCoconuts[Math.floor(Math.random() * attachedCoconuts.length)];
+
+            // Get world position of coconut
+            const worldPos = new THREE.Vector3();
+            coconut.getWorldPosition(worldPos);
+
+            // Remove from palm, add to scene as falling coconut
+            palm.remove(coconut);
+            coconut.position.copy(worldPos);
+            scene.add(coconut);
+
+            fallingCoconuts.push({
+                mesh: coconut,
+                velocity: 0,
+                groundY: palm.userData.groundY - 0.1,
+                bounces: 0
+            });
+        }
+
+        // Update falling coconuts
+        function updateFallingCoconuts(dt) {
+            const gravity = 15;
+            for (let i = fallingCoconuts.length - 1; i >= 0; i--) {
+                const fc = fallingCoconuts[i];
+                fc.velocity += gravity * dt;
+                fc.mesh.position.y -= fc.velocity * dt;
+
+                // Rotate as it falls
+                fc.mesh.rotation.x += dt * 3;
+                fc.mesh.rotation.z += dt * 2;
+
+                // Hit ground
+                if (fc.mesh.position.y <= fc.groundY) {
+                    fc.mesh.position.y = fc.groundY;
+                    fc.bounces++;
+                    if (fc.bounces < 3) {
+                        fc.velocity = -fc.velocity * 0.4; // Bounce
+                    } else {
+                        // Stop bouncing, remove after a delay
+                        fc.velocity = 0;
+                        // Fade out and remove
+                        setTimeout(() => {
+                            scene.remove(fc.mesh);
+                        }, 3000);
+                        fallingCoconuts.splice(i, 1);
+                    }
+                }
+            }
+        }
+
+        // Update diving board bobble
+        function updateDivingBoardBobble(dt) {
+            if (!divingBoardBobble.active || !divingBoard) return;
+
+            divingBoardBobble.time += dt;
+            const t = divingBoardBobble.time;
+
+            // Damped oscillation
+            const amplitude = 0.15 * Math.exp(-t * 3);
+            const frequency = 12;
+            const offset = amplitude * Math.sin(t * frequency);
+
+            divingBoard.position.y = divingBoardBobble.originalY + offset;
+
+            // Also add slight rotation for realism
+            divingBoard.rotation.z = offset * 0.3;
+
+            // Stop when amplitude is negligible
+            if (amplitude < 0.005) {
+                divingBoardBobble.active = false;
+                divingBoard.position.y = divingBoardBobble.originalY;
+                divingBoard.rotation.z = 0;
+            }
+        }
+
         function onTouchStart(e) {
             // Allow touch events on UI controls
             if (e.target.closest('#pov-control, #audio-control, #weather-control')) {
@@ -2386,6 +2614,7 @@
             cursorEl.style.top = t.clientY + 'px';
             cursorEl.classList.add('active');
 
+            checkInteractiveClick(t.clientX, t.clientY);
             const wp = screenToWorld(t.clientX, t.clientY);
             if (wp) {
                 addRipple(wp.x, wp.y, CONFIG.rippleStrength * 2);
@@ -2427,21 +2656,21 @@
 
         function updateUniforms() {
             const data = getRippleData();
-            const positions = [], params = [];
 
+            // Reuse pre-allocated Vector2 arrays instead of creating new objects
             for (let i = 0; i < MAX_RIPPLES; i++) {
-                positions.push(new THREE.Vector2(data.positions[i * 2], data.positions[i * 2 + 1]));
-                params.push(new THREE.Vector2(data.params[i * 2], data.params[i * 2 + 1]));
+                ripplePositionsCache[i].set(data.positions[i * 2], data.positions[i * 2 + 1]);
+                rippleParamsCache[i].set(data.params[i * 2], data.params[i * 2 + 1]);
             }
 
-            floor.material.uniforms.uRipplePositions.value = positions;
-            floor.material.uniforms.uRippleParams.value = params;
-            water.material.uniforms.uRipplePositions.value = positions;
-            water.material.uniforms.uRippleParams.value = params;
+            floor.material.uniforms.uRipplePositions.value = ripplePositionsCache;
+            floor.material.uniforms.uRippleParams.value = rippleParamsCache;
+            water.material.uniforms.uRipplePositions.value = ripplePositionsCache;
+            water.material.uniforms.uRippleParams.value = rippleParamsCache;
 
             toys.forEach(toy => {
-                toy.material.uniforms.uRipplePositions.value = positions;
-                toy.material.uniforms.uRippleParams.value = params;
+                toy.material.uniforms.uRipplePositions.value = ripplePositionsCache;
+                toy.material.uniforms.uRippleParams.value = rippleParamsCache;
             });
         }
 
@@ -2548,6 +2777,8 @@
             updateUniforms();
             updateToys(dt, elapsed);
             updateRain();
+            updateFallingCoconuts(dt);
+            updateDivingBoardBobble(dt);
 
             floor.material.uniforms.uTime.value = elapsed;
             water.material.uniforms.uTime.value = elapsed;
