@@ -1402,10 +1402,11 @@
 
             // Left mural panel - flat on ground, facing camera
             const groundY = -2.93;  // Just above ground level (-2.95)
+            const muralOffset = 7;  // Distance from pool edge
             const leftPanel = new THREE.PlaneGeometry(8, 6);
             leftPanel.rotateX(-Math.PI / 2);
             const leftMural = new THREE.Mesh(leftPanel, leftMuralMat);
-            leftMural.position.set(-poolWidth / 2 - 5, groundY, 4);
+            leftMural.position.set(-poolWidth / 2 - muralOffset, groundY, 4);
             scene.add(leftMural);
 
             // Marble frame for left mural (flat on ground)
@@ -1416,17 +1417,17 @@
             });
             const frameGeo = new THREE.BoxGeometry(8.4, 0.06, 0.25);
             const frameTop = new THREE.Mesh(frameGeo, frameMat);
-            frameTop.position.set(-poolWidth / 2 - 5, groundY + 0.03, 4 - 3.1);
+            frameTop.position.set(-poolWidth / 2 - muralOffset, groundY + 0.03, 4 - 3.1);
             scene.add(frameTop);
             const frameBottom = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
-            frameBottom.position.set(-poolWidth / 2 - 5, groundY + 0.03, 4 + 3.1);
+            frameBottom.position.set(-poolWidth / 2 - muralOffset, groundY + 0.03, 4 + 3.1);
             scene.add(frameBottom);
             const frameSideGeo = new THREE.BoxGeometry(0.25, 0.06, 6.4);
             const frameLeft = new THREE.Mesh(frameSideGeo, frameMat.clone());
-            frameLeft.position.set(-poolWidth / 2 - 5 - 4.1, groundY + 0.03, 4);
+            frameLeft.position.set(-poolWidth / 2 - muralOffset - 4.1, groundY + 0.03, 4);
             scene.add(frameLeft);
             const frameRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
-            frameRight.position.set(-poolWidth / 2 - 5 + 4.1, groundY + 0.03, 4);
+            frameRight.position.set(-poolWidth / 2 - muralOffset + 4.1, groundY + 0.03, 4);
             scene.add(frameRight);
 
             // ---- RIGHT MURAL: Greek inspired, blue and white ----
@@ -1551,21 +1552,21 @@
             const rightPanel = new THREE.PlaneGeometry(8, 6);
             rightPanel.rotateX(-Math.PI / 2);
             const rightMural = new THREE.Mesh(rightPanel, rightMuralMat);
-            rightMural.position.set(poolWidth / 2 + 5, groundY, 4);
+            rightMural.position.set(poolWidth / 2 + muralOffset, groundY, 4);
             scene.add(rightMural);
 
             // Marble frame for right mural (flat on ground)
             const frameTopRight = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
-            frameTopRight.position.set(poolWidth / 2 + 5, groundY + 0.03, 4 - 3.1);
+            frameTopRight.position.set(poolWidth / 2 + muralOffset, groundY + 0.03, 4 - 3.1);
             scene.add(frameTopRight);
             const frameBottomRight = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
-            frameBottomRight.position.set(poolWidth / 2 + 5, groundY + 0.03, 4 + 3.1);
+            frameBottomRight.position.set(poolWidth / 2 + muralOffset, groundY + 0.03, 4 + 3.1);
             scene.add(frameBottomRight);
             const frameLeftRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
-            frameLeftRight.position.set(poolWidth / 2 + 5 - 4.1, groundY + 0.03, 4);
+            frameLeftRight.position.set(poolWidth / 2 + muralOffset - 4.1, groundY + 0.03, 4);
             scene.add(frameLeftRight);
             const frameRightRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
-            frameRightRight.position.set(poolWidth / 2 + 5 + 4.1, groundY + 0.03, 4);
+            frameRightRight.position.set(poolWidth / 2 + muralOffset + 4.1, groundY + 0.03, 4);
             scene.add(frameRightRight);
         }
 
@@ -1750,43 +1751,71 @@
             ringMesh.position.set(0, gazeboY + 4.1, gazeboZ);
             scene.add(ringMesh);
 
-            // Add Japanese lettering "カロス・カガトス" (Kalos Kagathos) on front frieze
-            const textCanvas = document.createElement('canvas');
-            textCanvas.width = 512;
-            textCanvas.height = 64;
-            const ctx = textCanvas.getContext('2d');
+            // 3D frieze band around full circumference of gazebo
+            const friezeMat = new THREE.MeshStandardMaterial({
+                color: 0xF0EBE0,
+                roughness: 0.4,
+                metalness: 0.1
+            });
+            const friezeBandGeo = new THREE.TorusGeometry(2.65, 0.2, 8, 48);
+            friezeBandGeo.rotateX(Math.PI / 2);
+            const friezeBand = new THREE.Mesh(friezeBandGeo, friezeMat);
+            friezeBand.position.set(0, gazeboY + 3.7, gazeboZ);
+            scene.add(friezeBand);
 
-            // Semi-transparent marble background
-            ctx.fillStyle = 'rgba(245, 245, 245, 0.9)';
-            ctx.fillRect(0, 0, 512, 64);
-
-            // Gold/bronze text
-            ctx.fillStyle = '#8B7355';
-            ctx.font = 'bold 36px "Hiragino Kaku Gothic Pro", "Yu Gothic", "Meiryo", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('カロス・カガトス', 256, 32);
-
-            // Add subtle shadow/engraving effect
-            ctx.strokeStyle = '#6B5344';
-            ctx.lineWidth = 0.5;
-            ctx.strokeText('カロス・カガトス', 256, 32);
-
-            const textTexture = new THREE.CanvasTexture(textCanvas);
-            textTexture.needsUpdate = true;
-
-            const textMat = new THREE.MeshBasicMaterial({
-                map: textTexture,
-                transparent: true,
-                side: THREE.DoubleSide
+            // 3D raised letters "カロス・カガトス" around the circumference
+            const letterMat = new THREE.MeshStandardMaterial({
+                color: 0x8B6914,  // Gold/bronze color
+                roughness: 0.3,
+                metalness: 0.6
             });
 
-            // Create curved frieze panel for the text (arc facing camera)
-            const friezeGeo = new THREE.CylinderGeometry(2.7, 2.7, 0.4, 32, 1, true, Math.PI * 0.7, Math.PI * 0.6);
-            const frieze = new THREE.Mesh(friezeGeo, textMat);
-            frieze.position.set(0, gazeboY + 3.7, gazeboZ);
-            frieze.rotation.y = Math.PI; // Face toward camera
-            scene.add(frieze);
+            const characters = ['カ', 'ロ', 'ス', '・', 'カ', 'ガ', 'ト', 'ス'];
+            const letterRadius = 2.68;
+            const letterY = gazeboY + 3.7;
+            const startAngle = Math.PI * 0.25;  // Start angle
+            const angleSpan = Math.PI * 0.5;    // Spread across front half
+
+            characters.forEach((char, i) => {
+                const angle = startAngle + (i / (characters.length - 1)) * angleSpan;
+
+                // Create canvas for each character
+                const charCanvas = document.createElement('canvas');
+                charCanvas.width = 64;
+                charCanvas.height = 64;
+                const charCtx = charCanvas.getContext('2d');
+
+                charCtx.fillStyle = '#8B6914';
+                charCtx.font = 'bold 48px "Hiragino Kaku Gothic Pro", "Yu Gothic", sans-serif';
+                charCtx.textAlign = 'center';
+                charCtx.textBaseline = 'middle';
+                charCtx.fillText(char, 32, 32);
+
+                const charTexture = new THREE.CanvasTexture(charCanvas);
+
+                // Create 3D block for letter with depth
+                const letterGeo = new THREE.BoxGeometry(0.28, 0.32, 0.08);
+                const letterMesh = new THREE.Mesh(letterGeo, letterMat.clone());
+
+                // Position around the circumference
+                const x = Math.sin(angle) * letterRadius;
+                const z = gazeboZ + Math.cos(angle) * letterRadius;
+
+                letterMesh.position.set(x, letterY, z);
+                letterMesh.rotation.y = -angle + Math.PI;  // Face outward
+                scene.add(letterMesh);
+
+                // Add the character texture on front face
+                const frontGeo = new THREE.PlaneGeometry(0.26, 0.30);
+                const frontMat = new THREE.MeshBasicMaterial({
+                    map: charTexture,
+                    transparent: true
+                });
+                const frontFace = new THREE.Mesh(frontGeo, frontMat);
+                frontFace.position.set(x + Math.sin(angle) * 0.045, letterY, z + Math.cos(angle) * 0.045);
+                frontFace.rotation.y = -angle + Math.PI;
+                scene.add(frontFace);
+            });
 
             // Domed roof
             const domeGeo = new THREE.SphereGeometry(2.8, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
