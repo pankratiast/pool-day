@@ -703,6 +703,7 @@
             createStatues();
             createDivingBoard();
             createPoolChair();
+            createBenchPress();
             createLadder();
             createToys();
             createRain();
@@ -752,8 +753,8 @@
         function updateCameraPOV(value) {
             currentPOV = value;
             const t = value / 100;
-            const height = 16 - t * 5;
-            const zOffset = t * 10;
+            const height = 18 - t * 5;  // Raised slightly
+            const zOffset = 8 + t * 10;  // Backed up camera (was 0 + t * 10)
             camera.position.set(cameraPanX, height, zOffset + cameraPanZ);
             cameraTarget.set(cameraPanX, 0, cameraPanZ);
             camera.lookAt(cameraTarget);
@@ -2042,6 +2043,138 @@
             const rightFrame = new THREE.Mesh(frameGeo.clone(), whiteMat.clone());
             rightFrame.position.set(chairX + 0.55, deckY + 0.5, chairZ);
             scene.add(rightFrame);
+        }
+
+        // ============================================================
+        // BENCH PRESS (below right palm tree)
+        // ============================================================
+        function createBenchPress() {
+            const poolWidth = 16;
+            const poolLength = 20;
+            const deckY = -CONFIG.waterDepth + 0.8;
+
+            // Position below right palm tree
+            const benchX = poolWidth / 2 + 4;
+            const benchZ = -poolLength / 2 + 5;
+
+            // Black metal for the frame
+            const blackMetal = new THREE.MeshStandardMaterial({
+                color: 0x1a1a1a,
+                roughness: 0.4,
+                metalness: 0.8
+            });
+
+            // Red padding for the bench
+            const redPadding = new THREE.MeshStandardMaterial({
+                color: 0xCC2222,
+                roughness: 0.7,
+                metalness: 0.0
+            });
+
+            // Silver for the barbell
+            const silverMetal = new THREE.MeshStandardMaterial({
+                color: 0xC0C0C0,
+                roughness: 0.2,
+                metalness: 0.95
+            });
+
+            // Iron for the plates
+            const ironMat = new THREE.MeshStandardMaterial({
+                color: 0x2a2a2a,
+                roughness: 0.6,
+                metalness: 0.7
+            });
+
+            // Bench frame - main legs (4 vertical posts)
+            const legGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8);
+            const legPositions = [
+                [-0.25, 0, -0.6],
+                [0.25, 0, -0.6],
+                [-0.25, 0, 0.6],
+                [0.25, 0, 0.6]
+            ];
+            legPositions.forEach(pos => {
+                const leg = new THREE.Mesh(legGeo, blackMetal.clone());
+                leg.position.set(benchX + pos[0], deckY + 0.25, benchZ + pos[2]);
+                scene.add(leg);
+            });
+
+            // Bench frame - horizontal supports
+            const supportGeo = new THREE.BoxGeometry(0.6, 0.06, 0.06);
+            const frontSupport = new THREE.Mesh(supportGeo, blackMetal.clone());
+            frontSupport.position.set(benchX, deckY + 0.5, benchZ + 0.6);
+            scene.add(frontSupport);
+
+            const backSupport = new THREE.Mesh(supportGeo.clone(), blackMetal.clone());
+            backSupport.position.set(benchX, deckY + 0.5, benchZ - 0.6);
+            scene.add(backSupport);
+
+            // Bench padding (where you lie down)
+            const padGeo = new THREE.BoxGeometry(0.5, 0.12, 1.4);
+            const pad = new THREE.Mesh(padGeo, redPadding);
+            pad.position.set(benchX, deckY + 0.56, benchZ);
+            scene.add(pad);
+
+            // Rack uprights (for holding the barbell)
+            const uprightGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0, 8);
+            const leftUpright = new THREE.Mesh(uprightGeo, blackMetal.clone());
+            leftUpright.position.set(benchX - 0.4, deckY + 1.0, benchZ - 0.5);
+            scene.add(leftUpright);
+
+            const rightUpright = new THREE.Mesh(uprightGeo.clone(), blackMetal.clone());
+            rightUpright.position.set(benchX + 0.4, deckY + 1.0, benchZ - 0.5);
+            scene.add(rightUpright);
+
+            // Rack hooks (J-hooks to hold barbell)
+            const hookGeo = new THREE.BoxGeometry(0.08, 0.04, 0.12);
+            const leftHook = new THREE.Mesh(hookGeo, blackMetal.clone());
+            leftHook.position.set(benchX - 0.35, deckY + 1.4, benchZ - 0.45);
+            scene.add(leftHook);
+
+            const rightHook = new THREE.Mesh(hookGeo.clone(), blackMetal.clone());
+            rightHook.position.set(benchX + 0.35, deckY + 1.4, benchZ - 0.45);
+            scene.add(rightHook);
+
+            // Barbell bar
+            const barGeo = new THREE.CylinderGeometry(0.025, 0.025, 2.2, 12);
+            barGeo.rotateZ(Math.PI / 2);
+            const bar = new THREE.Mesh(barGeo, silverMetal);
+            bar.position.set(benchX, deckY + 1.45, benchZ - 0.45);
+            scene.add(bar);
+
+            // Weight plates - 2 on each side
+            const plateGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.06, 16);
+            plateGeo.rotateZ(Math.PI / 2);
+
+            // Left side plates
+            const leftPlate1 = new THREE.Mesh(plateGeo, ironMat.clone());
+            leftPlate1.position.set(benchX - 0.7, deckY + 1.45, benchZ - 0.45);
+            scene.add(leftPlate1);
+
+            const leftPlate2 = new THREE.Mesh(plateGeo.clone(), ironMat.clone());
+            leftPlate2.position.set(benchX - 0.8, deckY + 1.45, benchZ - 0.45);
+            scene.add(leftPlate2);
+
+            // Right side plates
+            const rightPlate1 = new THREE.Mesh(plateGeo.clone(), ironMat.clone());
+            rightPlate1.position.set(benchX + 0.7, deckY + 1.45, benchZ - 0.45);
+            scene.add(rightPlate1);
+
+            const rightPlate2 = new THREE.Mesh(plateGeo.clone(), ironMat.clone());
+            rightPlate2.position.set(benchX + 0.8, deckY + 1.45, benchZ - 0.45);
+            scene.add(rightPlate2);
+
+            // Collars (to hold plates on)
+            const collarGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8);
+            collarGeo.rotateZ(Math.PI / 2);
+
+            const leftCollar = new THREE.Mesh(collarGeo, silverMetal.clone());
+            leftCollar.position.set(benchX - 0.85, deckY + 1.45, benchZ - 0.45);
+            scene.add(leftCollar);
+
+            const rightCollar = new THREE.Mesh(collarGeo.clone(), silverMetal.clone());
+            rightCollar.position.set(benchX + 0.85, deckY + 1.45, benchZ - 0.45);
+            scene.add(rightCollar);
         }
 
         // ============================================================
