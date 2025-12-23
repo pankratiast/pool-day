@@ -1401,10 +1401,11 @@
             });
 
             // Left mural panel - flat on ground, facing camera
+            const groundY = -2.93;  // Just above ground level (-2.95)
             const leftPanel = new THREE.PlaneGeometry(8, 6);
             leftPanel.rotateX(-Math.PI / 2);
             const leftMural = new THREE.Mesh(leftPanel, leftMuralMat);
-            leftMural.position.set(-poolWidth / 2 - 5, deckY + 0.02, 4);
+            leftMural.position.set(-poolWidth / 2 - 5, groundY, 4);
             scene.add(leftMural);
 
             // Marble frame for left mural (flat on ground)
@@ -1413,19 +1414,19 @@
                 roughness: 0.3,
                 metalness: 0.1
             });
-            const frameGeo = new THREE.BoxGeometry(8.4, 0.15, 0.3);
+            const frameGeo = new THREE.BoxGeometry(8.4, 0.06, 0.25);
             const frameTop = new THREE.Mesh(frameGeo, frameMat);
-            frameTop.position.set(-poolWidth / 2 - 5, deckY + 0.08, 4 - 3.1);
+            frameTop.position.set(-poolWidth / 2 - 5, groundY + 0.03, 4 - 3.1);
             scene.add(frameTop);
             const frameBottom = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
-            frameBottom.position.set(-poolWidth / 2 - 5, deckY + 0.08, 4 + 3.1);
+            frameBottom.position.set(-poolWidth / 2 - 5, groundY + 0.03, 4 + 3.1);
             scene.add(frameBottom);
-            const frameSideGeo = new THREE.BoxGeometry(0.3, 0.15, 6.4);
+            const frameSideGeo = new THREE.BoxGeometry(0.25, 0.06, 6.4);
             const frameLeft = new THREE.Mesh(frameSideGeo, frameMat.clone());
-            frameLeft.position.set(-poolWidth / 2 - 5 - 4.1, deckY + 0.08, 4);
+            frameLeft.position.set(-poolWidth / 2 - 5 - 4.1, groundY + 0.03, 4);
             scene.add(frameLeft);
             const frameRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
-            frameRight.position.set(-poolWidth / 2 - 5 + 4.1, deckY + 0.08, 4);
+            frameRight.position.set(-poolWidth / 2 - 5 + 4.1, groundY + 0.03, 4);
             scene.add(frameRight);
 
             // ---- RIGHT MURAL: Greek inspired, blue and white ----
@@ -1550,21 +1551,21 @@
             const rightPanel = new THREE.PlaneGeometry(8, 6);
             rightPanel.rotateX(-Math.PI / 2);
             const rightMural = new THREE.Mesh(rightPanel, rightMuralMat);
-            rightMural.position.set(poolWidth / 2 + 5, deckY + 0.02, 4);
+            rightMural.position.set(poolWidth / 2 + 5, groundY, 4);
             scene.add(rightMural);
 
             // Marble frame for right mural (flat on ground)
             const frameTopRight = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
-            frameTopRight.position.set(poolWidth / 2 + 5, deckY + 0.08, 4 - 3.1);
+            frameTopRight.position.set(poolWidth / 2 + 5, groundY + 0.03, 4 - 3.1);
             scene.add(frameTopRight);
             const frameBottomRight = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
-            frameBottomRight.position.set(poolWidth / 2 + 5, deckY + 0.08, 4 + 3.1);
+            frameBottomRight.position.set(poolWidth / 2 + 5, groundY + 0.03, 4 + 3.1);
             scene.add(frameBottomRight);
             const frameLeftRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
-            frameLeftRight.position.set(poolWidth / 2 + 5 - 4.1, deckY + 0.08, 4);
+            frameLeftRight.position.set(poolWidth / 2 + 5 - 4.1, groundY + 0.03, 4);
             scene.add(frameLeftRight);
             const frameRightRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
-            frameRightRight.position.set(poolWidth / 2 + 5 + 4.1, deckY + 0.08, 4);
+            frameRightRight.position.set(poolWidth / 2 + 5 + 4.1, groundY + 0.03, 4);
             scene.add(frameRightRight);
         }
 
