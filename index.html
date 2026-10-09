@@ -10,17 +10,20 @@
         canvas { display: block; cursor: none; }
         #cursor {
             position: fixed;
+            left: 0;
+            top: 0;
             width: 24px;
             height: 24px;
             border: 2px solid rgba(255, 255, 255, 0.7);
             border-radius: 50%;
             pointer-events: none;
-            transform: translate(-50%, -50%);
+            transform: translate3d(var(--x, -100px), var(--y, -100px), 0) translate(-50%, -50%);
+            will-change: transform;
             z-index: 1000;
             box-shadow: 0 0 10px rgba(255,255,255,0.3);
         }
         #cursor.active {
-            transform: translate(-50%, -50%) scale(1.5);
+            transform: translate3d(var(--x, -100px), var(--y, -100px), 0) translate(-50%, -50%) scale(1.5);
             background: rgba(255, 255, 255, 0.2);
         }
         /* POV Slider */
@@ -169,7 +172,7 @@
     </div>
 
     <div id="audio-control">
-        <audio id="bg-audio" loop>
+        <audio id="bg-audio" loop preload="none">
             <source src="GORE - あなたの愛への奴隷.mp3" type="audio/mpeg">
         </audio>
         <button id="audio-btn" class="muted" title="Toggle sound">
@@ -187,13 +190,15 @@
     <script type="importmap">
     {
         "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
         }
     }
     </script>
 
     <script type="module">
         import * as THREE from 'three';
+        import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
         // ============================================================
         // MOBILE DETECTION
@@ -250,19 +255,6 @@
             }
         }
 
-        function getRippleData() {
-            const positions = [], params = [];
-            for (let i = 0; i < MAX_RIPPLES; i++) {
-                if (i < ripples.length) {
-                    positions.push(ripples[i].x, ripples[i].z);
-                    params.push(ripples[i].time, ripples[i].strength);
-                } else {
-                    positions.push(0, 0);
-                    params.push(-1, 0);
-                }
-            }
-            return { positions, params };
-        }
 
         // ============================================================
         // NOISE GLSL
@@ -355,28 +347,26 @@
             }
         `;
 
-        const floorFS = `
+        // Caustics are expensive (~80 noise lookups per pixel), so they are rendered
+        // into a low-res texture covering the pool floor and sampled by the floor shader.
+        const causticsVS = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = vec4(position.xy, 0.0, 1.0);
+            }
+        `;
+
+        const causticsFS = `
             uniform float uTime;
-            uniform vec3 uPoolColor;
-            uniform vec3 uPoolColorDeep;
-            uniform vec3 uPoolColorDark;
-            uniform vec3 uFloorColor;
-            uniform vec3 uGroutColor;
             uniform float uWaterDepth;
             uniform float uCausticIntensity;
+            uniform vec2 uFloorSize;
 
             varying vec2 vUv;
-            varying vec3 vWorldPos;
 
             ${NoiseGLSL}
             ${RippleGLSL}
-
-            float tiles(vec2 uv) {
-                vec2 t = fract(uv * 1.2);
-                float g = 0.02;
-                return smoothstep(0.0, g, t.x) * smoothstep(0.0, g, 1.0-t.x) *
-                       smoothstep(0.0, g, t.y) * smoothstep(0.0, g, 1.0-t.y);
-            }
 
             float getHeight(vec2 p, float t) {
                 float h = snoise(vec3(p * 0.3, t * 0.2)) * 0.6;
@@ -427,6 +417,33 @@
             }
 
             void main() {
+                // Same mapping as the floor plane's UVs (rotated -90deg about X)
+                vec2 wp = vec2((vUv.x - 0.5) * uFloorSize.x, (0.5 - vUv.y) * uFloorSize.y);
+                float caust = caustics(wp, uTime);
+                caust = pow(max(caust, 0.0), 1.2) * uCausticIntensity;
+                gl_FragColor = vec4(caust, 0.0, 0.0, 1.0);
+            }
+        `;
+
+        const floorFS = `
+            uniform vec3 uPoolColor;
+            uniform vec3 uPoolColorDeep;
+            uniform vec3 uPoolColorDark;
+            uniform vec3 uFloorColor;
+            uniform vec3 uGroutColor;
+            uniform sampler2D uCaustics;
+
+            varying vec2 vUv;
+            varying vec3 vWorldPos;
+
+            float tiles(vec2 uv) {
+                vec2 t = fract(uv * 1.2);
+                float g = 0.02;
+                return smoothstep(0.0, g, t.x) * smoothstep(0.0, g, 1.0-t.x) *
+                       smoothstep(0.0, g, t.y) * smoothstep(0.0, g, 1.0-t.y);
+            }
+
+            void main() {
                 vec2 wp = vWorldPos.xz;
 
                 // Subtle tile pattern
@@ -434,8 +451,7 @@
                 vec3 base = mix(uGroutColor, uFloorColor, tile * 0.3 + 0.7);
 
                 // Caustics - bright and prominent
-                float caust = caustics(wp, uTime);
-                caust = pow(max(caust, 0.0), 1.2) * uCausticIntensity;
+                float caust = texture2D(uCaustics, vUv).r;
 
                 // Bright caustic color (white-cyan)
                 vec3 causticColor = vec3(0.9, 1.0, 1.0);
@@ -646,6 +662,7 @@
         // ============================================================
         let scene, camera, renderer, clock;
         let floor, water;
+        let causticsTarget, causticsMaterial, causticsScene, causticsCamera;
         let toys = [];
         let raycaster, mouse;
         let cursorEl;
@@ -673,6 +690,42 @@
         let divingBoard = null;
         let divingBoardBobble = { active: false, time: 0, originalY: 0 };
 
+        // Bake static meshes into one mesh per material to cut draw calls
+        // (the scene is built from several hundred small primitives).
+        function mergeStatic(root, isExcluded) {
+            root.updateMatrixWorld(true);
+            const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+            const buckets = new Map();
+
+            root.traverse(obj => {
+                if (!obj.isMesh || obj === root || Array.isArray(obj.material)) return;
+                for (let o = obj; o && o !== root; o = o.parent) {
+                    if (isExcluded(o)) return;
+                }
+                const attrs = Object.keys(obj.geometry.attributes).sort().join(',');
+                const key = obj.material.uuid + '|' + attrs + '|' + (obj.geometry.index ? 'i' : 'n');
+                if (!buckets.has(key)) buckets.set(key, []);
+                buckets.get(key).push(obj);
+            });
+
+            const m = new THREE.Matrix4();
+            buckets.forEach(meshes => {
+                if (meshes.length < 2) return;
+                const geos = meshes.map(mesh => {
+                    m.multiplyMatrices(rootInverse, mesh.matrixWorld);
+                    return mesh.geometry.clone().applyMatrix4(m);
+                });
+                const merged = mergeGeometries(geos, false);
+                geos.forEach(g => g.dispose());
+                if (!merged) return;
+
+                const mergedMesh = new THREE.Mesh(merged, meshes[0].material);
+                mergedMesh.matrixAutoUpdate = false;
+                root.add(mergedMesh);
+                meshes.forEach(mesh => mesh.removeFromParent());
+            });
+        }
+
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x075985);
@@ -682,10 +735,11 @@
             updateCameraPOV(15);  // Default: 1-2 o'clock position
 
             // Disable anti-aliasing on mobile for performance
-            renderer = new THREE.WebGLRenderer({ antialias: !isMobile });
+            renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: 'high-performance' });
             renderer.setSize(window.innerWidth, window.innerHeight);
             // Lower pixel ratio on mobile (1 vs 2) for major performance boost
-            renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
+            pixelRatio = isMobile ? 1 : Math.min(window.devicePixelRatio, 2);
+            renderer.setPixelRatio(pixelRatio);
             document.body.appendChild(renderer.domElement);
 
             clock = new THREE.Clock();
@@ -709,6 +763,13 @@
             createToys();
             createRain();
 
+            // Toys, floor/water, rain, the diving board and coconuts move or animate
+            const dynamic = new Set([floor, water, rainParticles, divingBoard, window.waterfallMesh, ...toys]);
+            const isDynamic = o => dynamic.has(o) || o.userData.isCoconut || o.userData.isPalmTree || o.material?.transparent;
+            mergeStatic(scene, isDynamic);
+            // Palms stay as groups (they are click targets and coconuts detach from them)
+            palmTrees.forEach(palm => mergeStatic(palm, o => o.userData.isCoconut));
+
             // Set initial sunny weather
             setWeather('sunny');
 
@@ -722,6 +783,18 @@
 
             // Right-click drag for panning
             window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            // Releasing the mouse outside the window would otherwise leave a drag stuck on
+            const resetPointer = () => {
+                isDragging = false;
+                isMouseDown = false;
+                cursorEl.classList.remove('active');
+            };
+            window.addEventListener('blur', resetPointer);
+            document.documentElement.addEventListener('mouseleave', () => {
+                resetPointer();
+                moveCursor(-100, -100);
+            });
             window.addEventListener('wheel', onWheel, { passive: false });
 
             // POV slider
@@ -770,9 +843,8 @@
             } else {
                 cameraPanZ += e.deltaY * 0.01;
             }
-            // Clamp panning
-            cameraPanX = Math.max(-8, Math.min(8, cameraPanX));
-            cameraPanZ = Math.max(-8, Math.min(8, cameraPanZ));
+            // Same limits as right-drag panning so the camera doesn't jump
+            clampPan();
             updateCameraPOV(currentPOV);
         }
 
@@ -1045,7 +1117,7 @@
 
             // Secondary back cliff layer (depth)
             const cliffBack2 = new THREE.BoxGeometry(35, 12, 4);
-            const cliffBack2Mesh = new THREE.Mesh(cliffBack2, rockMat.clone());
+            const cliffBack2Mesh = new THREE.Mesh(cliffBack2, rockMat);
             cliffBack2Mesh.position.set(0, 5, -20);
             scene.add(cliffBack2Mesh);
 
@@ -1073,22 +1145,22 @@
 
             // Stepped rocks (like in Chao Island) - behind the pool
             const stepRock1 = new THREE.BoxGeometry(6, 2.5, 3);
-            const step1 = new THREE.Mesh(stepRock1, rockMat.clone());
+            const step1 = new THREE.Mesh(stepRock1, rockMat);
             step1.position.set(-6, -1, -14);
             scene.add(step1);
 
             const stepRock2 = new THREE.BoxGeometry(5, 2, 2.5);
-            const step2 = new THREE.Mesh(stepRock2, rockMat.clone());
+            const step2 = new THREE.Mesh(stepRock2, rockMat);
             step2.position.set(5, -1.5, -13);
             scene.add(step2);
 
             const stepRock3 = new THREE.BoxGeometry(4, 3.5, 3);
-            const step3 = new THREE.Mesh(stepRock3, rockMat.clone());
+            const step3 = new THREE.Mesh(stepRock3, rockMat);
             step3.position.set(-10, 0, -12);
             scene.add(step3);
 
             const stepRock4 = new THREE.BoxGeometry(5, 2.5, 3);
-            const step4 = new THREE.Mesh(stepRock4, rockMat.clone());
+            const step4 = new THREE.Mesh(stepRock4, rockMat);
             step4.position.set(9, -0.5, -14);
             scene.add(step4);
 
@@ -1130,14 +1202,14 @@
             // Front grass area - extended much further south
             const grassFront = new THREE.PlaneGeometry(80, 50);
             grassFront.rotateX(-Math.PI / 2);
-            const grassFrontMesh = new THREE.Mesh(grassFront, grassMat.clone());
+            const grassFrontMesh = new THREE.Mesh(grassFront, grassMat);
             grassFrontMesh.position.set(0, -2.95, 35);
             scene.add(grassFrontMesh);
 
             // Back grass (between pool and cliffs)
             const grassBack = new THREE.PlaneGeometry(50, 10);
             grassBack.rotateX(-Math.PI / 2);
-            const grassBackMesh = new THREE.Mesh(grassBack, grassMat.clone());
+            const grassBackMesh = new THREE.Mesh(grassBack, grassMat);
             grassBackMesh.position.set(0, -2.95, -17);
             scene.add(grassBackMesh);
 
@@ -1157,34 +1229,34 @@
             scene.add(caveInteriorMesh);
 
             // Rock archway around cave entrance
-            const archMat = rockMat.clone();
+            const archMat = rockMat;
 
             // Left rock pillar
             const leftPillar = new THREE.BoxGeometry(2.5, 5, 3);
-            const leftPillarMesh = new THREE.Mesh(leftPillar, archMat.clone());
+            const leftPillarMesh = new THREE.Mesh(leftPillar, archMat);
             leftPillarMesh.position.set(grottoX - 3, grottoY + 1.5, grottoZ);
             scene.add(leftPillarMesh);
 
             // Right rock pillar
             const rightPillar = new THREE.BoxGeometry(2.5, 5, 3);
-            const rightPillarMesh = new THREE.Mesh(rightPillar, archMat.clone());
+            const rightPillarMesh = new THREE.Mesh(rightPillar, archMat);
             rightPillarMesh.position.set(grottoX + 3, grottoY + 1.5, grottoZ);
             scene.add(rightPillarMesh);
 
             // Top arch rock
             const topArch = new THREE.BoxGeometry(8, 2.5, 3);
-            const topArchMesh = new THREE.Mesh(topArch, archMat.clone());
+            const topArchMesh = new THREE.Mesh(topArch, archMat);
             topArchMesh.position.set(grottoX, grottoY + 4.5, grottoZ);
             scene.add(topArchMesh);
 
             // Irregular rocks around entrance
             const rock1 = new THREE.DodecahedronGeometry(1.2);
-            const rock1Mesh = new THREE.Mesh(rock1, archMat.clone());
+            const rock1Mesh = new THREE.Mesh(rock1, archMat);
             rock1Mesh.position.set(grottoX - 4, grottoY + 4, grottoZ + 0.5);
             scene.add(rock1Mesh);
 
             const rock2 = new THREE.DodecahedronGeometry(0.9);
-            const rock2Mesh = new THREE.Mesh(rock2, archMat.clone());
+            const rock2Mesh = new THREE.Mesh(rock2, archMat);
             rock2Mesh.position.set(grottoX + 3.5, grottoY + 5, grottoZ + 0.3);
             scene.add(rock2Mesh);
 
@@ -1199,7 +1271,7 @@
                 const vineX = grottoX - 3 + Math.random() * 6;
                 const vineLength = 1.5 + Math.random() * 2.5;
                 const vineGeo = new THREE.CylinderGeometry(0.03, 0.02, vineLength, 6);
-                const vine = new THREE.Mesh(vineGeo, vineMat.clone());
+                const vine = new THREE.Mesh(vineGeo, vineMat);
                 vine.position.set(vineX, grottoY + 4.5 - vineLength / 2, grottoZ + 1);
                 // Slight random rotation for natural look
                 vine.rotation.x = (Math.random() - 0.5) * 0.3;
@@ -1210,7 +1282,7 @@
                 for (let j = 0; j < 3; j++) {
                     const leafGeo = new THREE.SphereGeometry(0.12, 6, 4);
                     leafGeo.scale(1, 0.5, 1);
-                    const leaf = new THREE.Mesh(leafGeo, vineMat.clone());
+                    const leaf = new THREE.Mesh(leafGeo, vineMat);
                     leaf.position.set(
                         vineX + (Math.random() - 0.5) * 0.2,
                         grottoY + 4.5 - vineLength * (0.3 + j * 0.25),
@@ -1246,7 +1318,7 @@
                 const rootGeo = new THREE.ConeGeometry(1.2, 4, 8);
                 rootGeo.rotateX(Math.PI / 2 + 0.6);
                 rootGeo.rotateY(angle);
-                const root = new THREE.Mesh(rootGeo, barkMat.clone());
+                const root = new THREE.Mesh(rootGeo, barkMat);
                 root.position.set(
                     treeX + Math.cos(angle) * 2.5,
                     treeY + 0.5,
@@ -1264,7 +1336,7 @@
             for (let i = 0; i < 8; i++) {
                 const mossGeo = new THREE.SphereGeometry(0.4 + Math.random() * 0.5, 8, 6);
                 mossGeo.scale(1.5, 0.3, 1);
-                const moss = new THREE.Mesh(mossGeo, mossMat.clone());
+                const moss = new THREE.Mesh(mossGeo, mossMat);
                 const mossAngle = Math.random() * Math.PI * 2;
                 const mossHeight = treeY + 2 + Math.random() * 8;
                 const trunkRadius = 3.5 - (mossHeight - treeY) * 0.17;
@@ -1278,11 +1350,11 @@
             }
 
             // Branches at top
-            const branchMat = barkMat.clone();
+            const branchMat = barkMat;
             for (let i = 0; i < 5; i++) {
                 const branchAngle = (i / 5) * Math.PI * 2 + Math.random() * 0.5;
                 const branchGeo = new THREE.CylinderGeometry(0.15, 0.4, 4, 8);
-                const branch = new THREE.Mesh(branchGeo, branchMat.clone());
+                const branch = new THREE.Mesh(branchGeo, branchMat);
                 branch.position.set(
                     treeX + Math.cos(branchAngle) * 1.2,
                     treeY + 11 + Math.random(),
@@ -1419,14 +1491,14 @@
             const frameTop = new THREE.Mesh(frameGeo, frameMat);
             frameTop.position.set(-poolWidth / 2 - muralOffset, groundY + 0.03, 4 - 3.1);
             scene.add(frameTop);
-            const frameBottom = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
+            const frameBottom = new THREE.Mesh(frameGeo.clone(), frameMat);
             frameBottom.position.set(-poolWidth / 2 - muralOffset, groundY + 0.03, 4 + 3.1);
             scene.add(frameBottom);
             const frameSideGeo = new THREE.BoxGeometry(0.25, 0.06, 6.4);
-            const frameLeft = new THREE.Mesh(frameSideGeo, frameMat.clone());
+            const frameLeft = new THREE.Mesh(frameSideGeo, frameMat);
             frameLeft.position.set(-poolWidth / 2 - muralOffset - 4.1, groundY + 0.03, 4);
             scene.add(frameLeft);
-            const frameRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
+            const frameRight = new THREE.Mesh(frameSideGeo.clone(), frameMat);
             frameRight.position.set(-poolWidth / 2 - muralOffset + 4.1, groundY + 0.03, 4);
             scene.add(frameRight);
 
@@ -1556,16 +1628,16 @@
             scene.add(rightMural);
 
             // Marble frame for right mural (flat on ground)
-            const frameTopRight = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
+            const frameTopRight = new THREE.Mesh(frameGeo.clone(), frameMat);
             frameTopRight.position.set(poolWidth / 2 + muralOffset, groundY + 0.03, 4 - 3.1);
             scene.add(frameTopRight);
-            const frameBottomRight = new THREE.Mesh(frameGeo.clone(), frameMat.clone());
+            const frameBottomRight = new THREE.Mesh(frameGeo.clone(), frameMat);
             frameBottomRight.position.set(poolWidth / 2 + muralOffset, groundY + 0.03, 4 + 3.1);
             scene.add(frameBottomRight);
-            const frameLeftRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
+            const frameLeftRight = new THREE.Mesh(frameSideGeo.clone(), frameMat);
             frameLeftRight.position.set(poolWidth / 2 + muralOffset - 4.1, groundY + 0.03, 4);
             scene.add(frameLeftRight);
-            const frameRightRight = new THREE.Mesh(frameSideGeo.clone(), frameMat.clone());
+            const frameRightRight = new THREE.Mesh(frameSideGeo.clone(), frameMat);
             frameRightRight.position.set(poolWidth / 2 + muralOffset + 4.1, groundY + 0.03, 4);
             scene.add(frameRightRight);
         }
@@ -1610,19 +1682,19 @@
 
             // Front wall (near side)
             const frontWall = new THREE.BoxGeometry(poolWidth + wallThickness * 2, wallHeight, wallThickness);
-            const frontWallMesh = new THREE.Mesh(frontWall, wallMat.clone());
+            const frontWallMesh = new THREE.Mesh(frontWall, wallMat);
             frontWallMesh.position.set(0, -CONFIG.waterDepth + wallHeight / 2, poolLength / 2 + wallThickness / 2);
             scene.add(frontWallMesh);
 
             // Left wall
             const leftWall = new THREE.BoxGeometry(wallThickness, wallHeight, poolLength);
-            const leftWallMesh = new THREE.Mesh(leftWall, wallMat.clone());
+            const leftWallMesh = new THREE.Mesh(leftWall, wallMat);
             leftWallMesh.position.set(-poolWidth / 2 - wallThickness / 2, -CONFIG.waterDepth + wallHeight / 2, 0);
             scene.add(leftWallMesh);
 
             // Right wall (where ladder will be)
             const rightWall = new THREE.BoxGeometry(wallThickness, wallHeight, poolLength);
-            const rightWallMesh = new THREE.Mesh(rightWall, wallMat.clone());
+            const rightWallMesh = new THREE.Mesh(rightWall, wallMat);
             rightWallMesh.position.set(poolWidth / 2 + wallThickness / 2, -CONFIG.waterDepth + wallHeight / 2, 0);
             scene.add(rightWallMesh);
 
@@ -1635,19 +1707,19 @@
 
             // Front coping
             const frontCoping = new THREE.BoxGeometry(poolWidth + copingWidth * 2 + wallThickness * 2, copingHeight, copingWidth);
-            const frontCopingMesh = new THREE.Mesh(frontCoping, copingMat.clone());
+            const frontCopingMesh = new THREE.Mesh(frontCoping, copingMat);
             frontCopingMesh.position.set(0, -CONFIG.waterDepth + wallHeight + copingHeight / 2, poolLength / 2 + wallThickness + copingWidth / 2 - 0.1);
             scene.add(frontCopingMesh);
 
             // Left coping
             const leftCoping = new THREE.BoxGeometry(copingWidth, copingHeight, poolLength + copingWidth * 2);
-            const leftCopingMesh = new THREE.Mesh(leftCoping, copingMat.clone());
+            const leftCopingMesh = new THREE.Mesh(leftCoping, copingMat);
             leftCopingMesh.position.set(-poolWidth / 2 - wallThickness - copingWidth / 2 + 0.1, -CONFIG.waterDepth + wallHeight + copingHeight / 2, 0);
             scene.add(leftCopingMesh);
 
             // Right coping
             const rightCoping = new THREE.BoxGeometry(copingWidth, copingHeight, poolLength + copingWidth * 2);
-            const rightCopingMesh = new THREE.Mesh(rightCoping, copingMat.clone());
+            const rightCopingMesh = new THREE.Mesh(rightCoping, copingMat);
             rightCopingMesh.position.set(poolWidth / 2 + wallThickness + copingWidth / 2 - 0.1, -CONFIG.waterDepth + wallHeight + copingHeight / 2, 0);
             scene.add(rightCopingMesh);
 
@@ -1666,19 +1738,19 @@
 
             // Front deck
             const frontDeck = new THREE.BoxGeometry(poolWidth + 6, 0.2, 4);
-            const frontDeckMesh = new THREE.Mesh(frontDeck, deckMat.clone());
+            const frontDeckMesh = new THREE.Mesh(frontDeck, deckMat);
             frontDeckMesh.position.set(0, -CONFIG.waterDepth + wallHeight + 0.05, poolLength / 2 + 3);
             scene.add(frontDeckMesh);
 
             // Left deck
             const leftDeck = new THREE.BoxGeometry(3, 0.2, poolLength + 8);
-            const leftDeckMesh = new THREE.Mesh(leftDeck, deckMat.clone());
+            const leftDeckMesh = new THREE.Mesh(leftDeck, deckMat);
             leftDeckMesh.position.set(-poolWidth / 2 - 2.5, -CONFIG.waterDepth + wallHeight + 0.05, 0);
             scene.add(leftDeckMesh);
 
             // Right deck
             const rightDeck = new THREE.BoxGeometry(3, 0.2, poolLength + 8);
-            const rightDeckMesh = new THREE.Mesh(rightDeck, deckMat.clone());
+            const rightDeckMesh = new THREE.Mesh(rightDeck, deckMat);
             rightDeckMesh.position.set(poolWidth / 2 + 2.5, -CONFIG.waterDepth + wallHeight + 0.05, 0);
             scene.add(rightDeckMesh);
         }
@@ -1707,7 +1779,7 @@
 
             // Step
             const stepGeo = new THREE.CylinderGeometry(3.5, 3.7, 0.15, 32);
-            const stepMesh = new THREE.Mesh(stepGeo, marbleMat.clone());
+            const stepMesh = new THREE.Mesh(stepGeo, marbleMat);
             stepMesh.position.set(0, gazeboY, gazeboZ);
             scene.add(stepMesh);
 
@@ -1715,7 +1787,7 @@
             const columnGeo = new THREE.CylinderGeometry(0.3, 0.35, 5.0, 16);
             for (let i = 0; i < 6; i++) {
                 const angle = (i / 6) * Math.PI * 2;
-                const column = new THREE.Mesh(columnGeo.clone(), marbleMat.clone());
+                const column = new THREE.Mesh(columnGeo.clone(), marbleMat);
                 column.position.set(
                     Math.cos(angle) * 2.5,
                     gazeboY + 2.8,
@@ -1725,7 +1797,7 @@
 
                 // Column capital (decorative top)
                 const capitalGeo = new THREE.BoxGeometry(0.65, 0.25, 0.65);
-                const capital = new THREE.Mesh(capitalGeo, marbleMat.clone());
+                const capital = new THREE.Mesh(capitalGeo, marbleMat);
                 capital.position.set(
                     Math.cos(angle) * 2.5,
                     gazeboY + 5.4,
@@ -1735,7 +1807,7 @@
 
                 // Column base
                 const colBaseGeo = new THREE.CylinderGeometry(0.4, 0.45, 0.25, 16);
-                const colBase = new THREE.Mesh(colBaseGeo, marbleMat.clone());
+                const colBase = new THREE.Mesh(colBaseGeo, marbleMat);
                 colBase.position.set(
                     Math.cos(angle) * 2.5,
                     gazeboY + 0.43,
@@ -1747,7 +1819,7 @@
             // Circular entablature (ring at top of columns)
             const ringGeo = new THREE.TorusGeometry(2.5, 0.3, 8, 32);
             ringGeo.rotateX(Math.PI / 2);
-            const ringMesh = new THREE.Mesh(ringGeo, marbleMat.clone());
+            const ringMesh = new THREE.Mesh(ringGeo, marbleMat);
             ringMesh.position.set(0, gazeboY + 5.6, gazeboZ);
             scene.add(ringMesh);
 
@@ -1795,7 +1867,7 @@
 
                 // Create 3D block for letter with depth
                 const letterGeo = new THREE.BoxGeometry(0.28, 0.32, 0.08);
-                const letterMesh = new THREE.Mesh(letterGeo, letterMat.clone());
+                const letterMesh = new THREE.Mesh(letterGeo, letterMat);
 
                 // Position around the circumference
                 const x = Math.sin(angle) * letterRadius;
@@ -1819,19 +1891,19 @@
 
             // Domed roof
             const domeGeo = new THREE.SphereGeometry(2.8, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            const domeMesh = new THREE.Mesh(domeGeo, marbleMat.clone());
+            const domeMesh = new THREE.Mesh(domeGeo, marbleMat);
             domeMesh.position.set(0, gazeboY + 5.6, gazeboZ);
             scene.add(domeMesh);
 
             // Finial on top
             const finialGeo = new THREE.ConeGeometry(0.15, 0.5, 8);
-            const finialMesh = new THREE.Mesh(finialGeo, marbleMat.clone());
+            const finialMesh = new THREE.Mesh(finialGeo, marbleMat);
             finialMesh.position.set(0, gazeboY + 8.6, gazeboZ);
             scene.add(finialMesh);
 
             // Decorative sphere under finial
             const sphereGeo = new THREE.SphereGeometry(0.2, 16, 12);
-            const sphereMesh = new THREE.Mesh(sphereGeo, marbleMat.clone());
+            const sphereMesh = new THREE.Mesh(sphereGeo, marbleMat);
             sphereMesh.position.set(0, gazeboY + 8.2, gazeboZ);
             scene.add(sphereMesh);
         }
@@ -1877,7 +1949,7 @@
                 // Pot rim
                 const rimGeo = new THREE.TorusGeometry(0.37, 0.05, 8, 16);
                 rimGeo.rotateX(Math.PI / 2);
-                const rim = new THREE.Mesh(rimGeo, potMat.clone());
+                const rim = new THREE.Mesh(rimGeo, potMat);
                 rim.position.y = 0.5;
                 group.add(rim);
 
@@ -1891,7 +1963,7 @@
                     // Bushy plant with multiple leaf clusters
                     for (let i = 0; i < 5; i++) {
                         const leafCluster = new THREE.SphereGeometry(0.2 + Math.random() * 0.1, 8, 6);
-                        const leaf = new THREE.Mesh(leafCluster, leafMat.clone());
+                        const leaf = new THREE.Mesh(leafCluster, leafMat);
                         const angle = (i / 5) * Math.PI * 2;
                         leaf.position.set(
                             Math.cos(angle) * 0.15,
@@ -1902,14 +1974,14 @@
                     }
                     // Central top cluster
                     const topCluster = new THREE.SphereGeometry(0.25, 8, 6);
-                    const top = new THREE.Mesh(topCluster, leafMat.clone());
+                    const top = new THREE.Mesh(topCluster, leafMat);
                     top.position.y = 0.95;
                     group.add(top);
                 } else if (plantType === 'fern') {
                     // Fern with upward spreading fronds
                     for (let i = 0; i < 8; i++) {
                         const frondGeo = new THREE.ConeGeometry(0.08, 0.6, 4);
-                        const frond = new THREE.Mesh(frondGeo, leafMat.clone());
+                        const frond = new THREE.Mesh(frondGeo, leafMat);
                         const angle = (i / 8) * Math.PI * 2;
                         frond.position.set(
                             Math.cos(angle) * 0.1,
@@ -1930,7 +2002,7 @@
                     for (let i = 0; i < 4; i++) {
                         const leafGeo = new THREE.SphereGeometry(0.15, 8, 6);
                         leafGeo.scale(1, 0.5, 1.5);
-                        const leaf = new THREE.Mesh(leafGeo, leafMat.clone());
+                        const leaf = new THREE.Mesh(leafGeo, leafMat);
                         const angle = (i / 4) * Math.PI * 2;
                         leaf.position.set(
                             Math.cos(angle) * 0.2,
@@ -2009,7 +2081,7 @@
                 const bottomRadius = 0.4 - (i * 0.02);
                 const topRadius = 0.38 - (i * 0.02);
                 const segmentGeo = new THREE.CylinderGeometry(topRadius, bottomRadius, segmentHeight, 12);
-                const segment = new THREE.Mesh(segmentGeo, trunkMat.clone());
+                const segment = new THREE.Mesh(segmentGeo, trunkMat);
                 segment.position.y = i * segmentHeight + segmentHeight / 2;
 
                 // Add slight curve to trunk
@@ -2021,7 +2093,7 @@
                 if (i % 2 === 0) {
                     const ringGeo = new THREE.TorusGeometry(bottomRadius + 0.02, 0.03, 6, 16);
                     ringGeo.rotateX(Math.PI / 2);
-                    const ring = new THREE.Mesh(ringGeo, trunkMat.clone());
+                    const ring = new THREE.Mesh(ringGeo, trunkMat);
                     ring.position.y = i * segmentHeight;
                     ring.position.x = segment.position.x;
                     ring.position.z = segment.position.z;
@@ -2040,7 +2112,7 @@
                 // Main frond stem
                 const stemLength = 3 + Math.random() * 0.5;
                 const stemGeo = new THREE.CylinderGeometry(0.03, 0.05, stemLength, 6);
-                const stem = new THREE.Mesh(stemGeo, leafMat.clone());
+                const stem = new THREE.Mesh(stemGeo, leafMat);
                 stem.position.y = stemLength / 2;
                 stem.rotation.x = 0.6 + Math.random() * 0.3;
                 frondGroup.add(stem);
@@ -2048,14 +2120,14 @@
                 // Leaflets along the stem
                 for (let j = 0; j < 8; j++) {
                     const leafletGeo = new THREE.PlaneGeometry(0.15, 0.8);
-                    const leaflet = new THREE.Mesh(leafletGeo, leafMat.clone());
+                    const leaflet = new THREE.Mesh(leafletGeo, leafMat);
                     leaflet.position.y = 0.4 + j * 0.3;
                     leaflet.position.x = 0.15;
                     leaflet.rotation.z = -0.3;
                     leaflet.rotation.y = 0.2;
                     frondGroup.add(leaflet);
 
-                    const leaflet2 = new THREE.Mesh(leafletGeo.clone(), leafMat.clone());
+                    const leaflet2 = new THREE.Mesh(leafletGeo.clone(), leafMat);
                     leaflet2.position.y = 0.4 + j * 0.3;
                     leaflet2.position.x = -0.15;
                     leaflet2.rotation.z = 0.3;
@@ -2079,9 +2151,10 @@
             coconutPositions.forEach(pos => {
                 const coconutGeo = new THREE.SphereGeometry(0.2, 12, 10);
                 coconutGeo.scale(1, 1.2, 1);
-                const coconut = new THREE.Mesh(coconutGeo, coconutMat.clone());
+                const coconut = new THREE.Mesh(coconutGeo, coconutMat);
                 coconut.position.set(pos[0], pos[1], pos[2]);
                 coconut.userData.isCoconut = true;
+                coconut.userData.homePos = coconut.position.clone();
                 coconuts.push(coconut);
                 group.add(coconut);
             });
@@ -2104,9 +2177,10 @@
             coconutPositions.forEach(pos => {
                 const coconutGeo = new THREE.SphereGeometry(0.2, 12, 10);
                 coconutGeo.scale(1, 1.2, 1);
-                const coconut = new THREE.Mesh(coconutGeo, coconutMat.clone());
+                const coconut = new THREE.Mesh(coconutGeo, coconutMat);
                 coconut.position.set(pos[0], pos[1], pos[2]);
                 coconut.userData.isCoconut = true;
+                coconut.userData.homePos = coconut.position.clone();
                 coconuts2.push(coconut);
                 group2.add(coconut);
             });
@@ -2138,39 +2212,39 @@
 
                 // Pedestal
                 const pedestalGeo = new THREE.BoxGeometry(0.8, 1.2, 0.8);
-                const pedestal = new THREE.Mesh(pedestalGeo, marbleMat.clone());
+                const pedestal = new THREE.Mesh(pedestalGeo, marbleMat);
                 pedestal.position.y = 0.6;
                 group.add(pedestal);
 
                 // Pedestal top trim
                 const trimGeo = new THREE.BoxGeometry(0.9, 0.1, 0.9);
-                const trim = new THREE.Mesh(trimGeo, marbleMat.clone());
+                const trim = new THREE.Mesh(trimGeo, marbleMat);
                 trim.position.y = 1.25;
                 group.add(trim);
 
                 // Body/torso (elongated cylinder)
                 const torsoGeo = new THREE.CylinderGeometry(0.25, 0.3, 1.2, 12);
-                const torso = new THREE.Mesh(torsoGeo, marbleMat.clone());
+                const torso = new THREE.Mesh(torsoGeo, marbleMat);
                 torso.position.y = 2.0;
                 group.add(torso);
 
                 // Chest/shoulders
                 const chestGeo = new THREE.SphereGeometry(0.35, 12, 8);
                 chestGeo.scale(1.2, 0.8, 0.8);
-                const chest = new THREE.Mesh(chestGeo, marbleMat.clone());
+                const chest = new THREE.Mesh(chestGeo, marbleMat);
                 chest.position.y = 2.5;
                 group.add(chest);
 
                 // Head
                 const headGeo = new THREE.SphereGeometry(0.22, 12, 10);
                 headGeo.scale(0.85, 1, 0.9);
-                const head = new THREE.Mesh(headGeo, marbleMat.clone());
+                const head = new THREE.Mesh(headGeo, marbleMat);
                 head.position.y = 3.0;
                 group.add(head);
 
                 // Draped cloth/robe effect (cone)
                 const robeGeo = new THREE.ConeGeometry(0.45, 1.4, 12);
-                const robe = new THREE.Mesh(robeGeo, marbleMat.clone());
+                const robe = new THREE.Mesh(robeGeo, marbleMat);
                 robe.position.y = 1.5;
                 robe.rotation.x = Math.PI;
                 group.add(robe);
@@ -2186,65 +2260,65 @@
 
                 // Larger pedestal for Hercules
                 const pedestalGeo = new THREE.BoxGeometry(1.0, 1.4, 1.0);
-                const pedestal = new THREE.Mesh(pedestalGeo, marbleMat.clone());
+                const pedestal = new THREE.Mesh(pedestalGeo, marbleMat);
                 pedestal.position.y = 0.7;
                 group.add(pedestal);
 
                 // Pedestal top trim
                 const trimGeo = new THREE.BoxGeometry(1.1, 0.12, 1.1);
-                const trim = new THREE.Mesh(trimGeo, marbleMat.clone());
+                const trim = new THREE.Mesh(trimGeo, marbleMat);
                 trim.position.y = 1.45;
                 group.add(trim);
 
                 // Muscular legs
                 const legGeo = new THREE.CylinderGeometry(0.18, 0.15, 1.0, 10);
-                const leftLeg = new THREE.Mesh(legGeo, marbleMat.clone());
+                const leftLeg = new THREE.Mesh(legGeo, marbleMat);
                 leftLeg.position.set(-0.15, 2.0, 0);
                 group.add(leftLeg);
-                const rightLeg = new THREE.Mesh(legGeo.clone(), marbleMat.clone());
+                const rightLeg = new THREE.Mesh(legGeo.clone(), marbleMat);
                 rightLeg.position.set(0.15, 2.0, 0);
                 group.add(rightLeg);
 
                 // Muscular torso (broader)
                 const torsoGeo = new THREE.CylinderGeometry(0.35, 0.32, 1.0, 12);
-                const torso = new THREE.Mesh(torsoGeo, marbleMat.clone());
+                const torso = new THREE.Mesh(torsoGeo, marbleMat);
                 torso.position.y = 2.9;
                 group.add(torso);
 
                 // Broad chest/shoulders
                 const chestGeo = new THREE.SphereGeometry(0.45, 12, 8);
                 chestGeo.scale(1.4, 0.9, 0.9);
-                const chest = new THREE.Mesh(chestGeo, marbleMat.clone());
+                const chest = new THREE.Mesh(chestGeo, marbleMat);
                 chest.position.y = 3.35;
                 group.add(chest);
 
                 // Muscular arms
                 const armGeo = new THREE.CylinderGeometry(0.12, 0.1, 0.8, 8);
-                const leftArm = new THREE.Mesh(armGeo, marbleMat.clone());
+                const leftArm = new THREE.Mesh(armGeo, marbleMat);
                 leftArm.position.set(-0.5, 3.2, 0);
                 leftArm.rotation.z = 0.3;
                 group.add(leftArm);
-                const rightArm = new THREE.Mesh(armGeo.clone(), marbleMat.clone());
+                const rightArm = new THREE.Mesh(armGeo.clone(), marbleMat);
                 rightArm.position.set(0.5, 3.0, 0.1);
                 rightArm.rotation.z = -0.8;
                 group.add(rightArm);
 
                 // Head
                 const headGeo = new THREE.SphereGeometry(0.25, 12, 10);
-                const head = new THREE.Mesh(headGeo, marbleMat.clone());
+                const head = new THREE.Mesh(headGeo, marbleMat);
                 head.position.y = 3.85;
                 group.add(head);
 
                 // Beard
                 const beardGeo = new THREE.SphereGeometry(0.15, 8, 6);
                 beardGeo.scale(1, 1.2, 0.8);
-                const beard = new THREE.Mesh(beardGeo, marbleMat.clone());
+                const beard = new THREE.Mesh(beardGeo, marbleMat);
                 beard.position.set(0, 3.7, 0.15);
                 group.add(beard);
 
                 // Club (held in right hand, resting on ground)
                 const clubGeo = new THREE.CylinderGeometry(0.08, 0.15, 2.0, 8);
-                const club = new THREE.Mesh(clubGeo, marbleMat.clone());
+                const club = new THREE.Mesh(clubGeo, marbleMat);
                 club.position.set(0.7, 2.2, 0.2);
                 club.rotation.z = 0.15;
                 group.add(club);
@@ -2252,7 +2326,7 @@
                 // Lion skin draped (simplified as cloth on shoulder)
                 const skinGeo = new THREE.SphereGeometry(0.25, 8, 6);
                 skinGeo.scale(1.5, 0.6, 1);
-                const skin = new THREE.Mesh(skinGeo, marbleMat.clone());
+                const skin = new THREE.Mesh(skinGeo, marbleMat);
                 skin.position.set(-0.4, 3.5, 0.2);
                 group.add(skin);
 
@@ -2267,51 +2341,51 @@
 
                 // Pedestal
                 const pedestalGeo = new THREE.CylinderGeometry(0.5, 0.6, 1.0, 16);
-                const pedestal = new THREE.Mesh(pedestalGeo, marbleMat.clone());
+                const pedestal = new THREE.Mesh(pedestalGeo, marbleMat);
                 pedestal.position.y = 0.5;
                 group.add(pedestal);
 
                 // Pedestal trim
                 const trimGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.1, 16);
-                const trim = new THREE.Mesh(trimGeo, marbleMat.clone());
+                const trim = new THREE.Mesh(trimGeo, marbleMat);
                 trim.position.y = 1.05;
                 group.add(trim);
 
                 // Graceful body (slimmer, feminine)
                 const bodyGeo = new THREE.CylinderGeometry(0.2, 0.25, 1.4, 12);
-                const body = new THREE.Mesh(bodyGeo, marbleMat.clone());
+                const body = new THREE.Mesh(bodyGeo, marbleMat);
                 body.position.y = 1.85;
                 group.add(body);
 
                 // Shoulders/chest
                 const chestGeo = new THREE.SphereGeometry(0.28, 12, 8);
                 chestGeo.scale(1.1, 0.7, 0.8);
-                const chest = new THREE.Mesh(chestGeo, marbleMat.clone());
+                const chest = new THREE.Mesh(chestGeo, marbleMat);
                 chest.position.y = 2.5;
                 group.add(chest);
 
                 // Head
                 const headGeo = new THREE.SphereGeometry(0.18, 12, 10);
-                const head = new THREE.Mesh(headGeo, marbleMat.clone());
+                const head = new THREE.Mesh(headGeo, marbleMat);
                 head.position.y = 2.9;
                 group.add(head);
 
                 // Hair (bun style)
                 const hairGeo = new THREE.SphereGeometry(0.15, 8, 6);
-                const hair = new THREE.Mesh(hairGeo, marbleMat.clone());
+                const hair = new THREE.Mesh(hairGeo, marbleMat);
                 hair.position.set(0, 3.05, -0.05);
                 group.add(hair);
 
                 // Flowing robe
                 const robeGeo = new THREE.ConeGeometry(0.4, 1.5, 12);
-                const robe = new THREE.Mesh(robeGeo, marbleMat.clone());
+                const robe = new THREE.Mesh(robeGeo, marbleMat);
                 robe.position.y = 1.35;
                 robe.rotation.x = Math.PI;
                 group.add(robe);
 
                 // Arms holding vessel (raised, pouring into pool)
                 const armGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.6, 8);
-                const arm = new THREE.Mesh(armGeo, marbleMat.clone());
+                const arm = new THREE.Mesh(armGeo, marbleMat);
                 arm.position.set(0.3, 2.6, 0.2);
                 arm.rotation.z = -0.5;
                 arm.rotation.x = 0.3;
@@ -2319,7 +2393,7 @@
 
                 // Water vessel/amphora
                 const vesselGeo = new THREE.CylinderGeometry(0.12, 0.08, 0.35, 12);
-                const vessel = new THREE.Mesh(vesselGeo, marbleMat.clone());
+                const vessel = new THREE.Mesh(vesselGeo, marbleMat);
                 vessel.position.set(0.45, 2.7, 0.35);
                 vessel.rotation.z = -0.8;
                 vessel.rotation.x = 0.5;
@@ -2342,7 +2416,7 @@
                 // Water splash at bottom
                 const splashGeo = new THREE.SphereGeometry(0.15, 8, 6);
                 splashGeo.scale(1.5, 0.5, 1.5);
-                const splash = new THREE.Mesh(splashGeo, waterMat.clone());
+                const splash = new THREE.Mesh(splashGeo, waterMat);
                 splash.position.set(0.7, 0.9, 0.7);
                 group.add(splash);
 
@@ -2391,17 +2465,17 @@
 
             // Support pillars
             const pillarGeo = new THREE.BoxGeometry(0.15, 1.2, 0.15);
-            const leftPillar = new THREE.Mesh(pillarGeo, whiteMat.clone());
+            const leftPillar = new THREE.Mesh(pillarGeo, whiteMat);
             leftPillar.position.set(boardX - 0.3, deckY + 1.4, boardZ - 0.5);
             scene.add(leftPillar);
 
-            const rightPillar = new THREE.Mesh(pillarGeo.clone(), whiteMat.clone());
+            const rightPillar = new THREE.Mesh(pillarGeo.clone(), whiteMat);
             rightPillar.position.set(boardX - 0.3, deckY + 1.4, boardZ + 0.5);
             scene.add(rightPillar);
 
             // The diving board plank
             const boardGeo = new THREE.BoxGeometry(3.5, 0.12, 0.7);
-            const board = new THREE.Mesh(boardGeo, whiteMat.clone());
+            const board = new THREE.Mesh(boardGeo, whiteMat);
             board.position.set(boardX + 1.2, deckY + 2.0, boardZ);
             board.userData.isDivingBoard = true;
             divingBoard = board;
@@ -2416,8 +2490,8 @@
             });
             const ridgeGeo = new THREE.BoxGeometry(3.2, 0.02, 0.6);
             const ridge = new THREE.Mesh(ridgeGeo, ridgeMat);
-            ridge.position.set(boardX + 1.2, deckY + 2.07, boardZ);
-            scene.add(ridge);
+            ridge.position.set(0, 0.07, 0);  // Child of the board so it bobbles with it
+            board.add(ridge);
 
             // Side rails
             const railMat = new THREE.MeshStandardMaterial({
@@ -2431,14 +2505,14 @@
             leftRail.position.set(boardX - 0.2, deckY + 2.5, boardZ - 0.4);
             scene.add(leftRail);
 
-            const rightRail = new THREE.Mesh(railGeo.clone(), railMat.clone());
+            const rightRail = new THREE.Mesh(railGeo.clone(), railMat);
             rightRail.position.set(boardX - 0.2, deckY + 2.5, boardZ + 0.4);
             scene.add(rightRail);
 
             // Horizontal rail connector
             const connectorGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.8, 8);
             connectorGeo.rotateX(Math.PI / 2);
-            const connector = new THREE.Mesh(connectorGeo, railMat.clone());
+            const connector = new THREE.Mesh(connectorGeo, railMat);
             connector.position.set(boardX - 0.2, deckY + 3.0, boardZ);
             scene.add(connector);
         }
@@ -2468,7 +2542,7 @@
                 [0.5, 0, 0.9]
             ];
             legPositions.forEach(pos => {
-                const leg = new THREE.Mesh(legGeo, whiteMat.clone());
+                const leg = new THREE.Mesh(legGeo, whiteMat);
                 leg.position.set(chairX + pos[0], deckY + 0.25, chairZ + pos[2]);
                 scene.add(leg);
             });
@@ -2476,7 +2550,7 @@
             // Seat base (horizontal slats)
             const slatGeo = new THREE.BoxGeometry(1.2, 0.06, 0.12);
             for (let i = 0; i < 8; i++) {
-                const slat = new THREE.Mesh(slatGeo, whiteMat.clone());
+                const slat = new THREE.Mesh(slatGeo, whiteMat);
                 slat.position.set(chairX, deckY + 0.5, chairZ - 0.7 + i * 0.2);
                 scene.add(slat);
             }
@@ -2484,7 +2558,7 @@
             // Backrest (angled at 45 degrees)
             const backGeo = new THREE.BoxGeometry(1.2, 0.06, 0.12);
             for (let i = 0; i < 6; i++) {
-                const back = new THREE.Mesh(backGeo, whiteMat.clone());
+                const back = new THREE.Mesh(backGeo, whiteMat);
                 // Position along the 45-degree angle
                 const zOffset = -0.9 - i * 0.12 * Math.cos(Math.PI / 4);
                 const yOffset = 0.5 + i * 0.12 * Math.sin(Math.PI / 4);
@@ -2495,11 +2569,11 @@
 
             // Side frame rails
             const frameGeo = new THREE.BoxGeometry(0.08, 0.08, 2.2);
-            const leftFrame = new THREE.Mesh(frameGeo, whiteMat.clone());
+            const leftFrame = new THREE.Mesh(frameGeo, whiteMat);
             leftFrame.position.set(chairX - 0.55, deckY + 0.5, chairZ);
             scene.add(leftFrame);
 
-            const rightFrame = new THREE.Mesh(frameGeo.clone(), whiteMat.clone());
+            const rightFrame = new THREE.Mesh(frameGeo.clone(), whiteMat);
             rightFrame.position.set(chairX + 0.55, deckY + 0.5, chairZ);
             scene.add(rightFrame);
         }
@@ -2553,18 +2627,18 @@
                 [0.25, 0, 0.6]
             ];
             legPositions.forEach(pos => {
-                const leg = new THREE.Mesh(legGeo, blackMetal.clone());
+                const leg = new THREE.Mesh(legGeo, blackMetal);
                 leg.position.set(benchX + pos[0], deckY + 0.25, benchZ + pos[2]);
                 scene.add(leg);
             });
 
             // Bench frame - horizontal supports
             const supportGeo = new THREE.BoxGeometry(0.6, 0.06, 0.06);
-            const frontSupport = new THREE.Mesh(supportGeo, blackMetal.clone());
+            const frontSupport = new THREE.Mesh(supportGeo, blackMetal);
             frontSupport.position.set(benchX, deckY + 0.5, benchZ + 0.6);
             scene.add(frontSupport);
 
-            const backSupport = new THREE.Mesh(supportGeo.clone(), blackMetal.clone());
+            const backSupport = new THREE.Mesh(supportGeo.clone(), blackMetal);
             backSupport.position.set(benchX, deckY + 0.5, benchZ - 0.6);
             scene.add(backSupport);
 
@@ -2576,21 +2650,21 @@
 
             // Rack uprights (for holding the barbell)
             const uprightGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0, 8);
-            const leftUpright = new THREE.Mesh(uprightGeo, blackMetal.clone());
+            const leftUpright = new THREE.Mesh(uprightGeo, blackMetal);
             leftUpright.position.set(benchX - 0.4, deckY + 1.0, benchZ - 0.5);
             scene.add(leftUpright);
 
-            const rightUpright = new THREE.Mesh(uprightGeo.clone(), blackMetal.clone());
+            const rightUpright = new THREE.Mesh(uprightGeo.clone(), blackMetal);
             rightUpright.position.set(benchX + 0.4, deckY + 1.0, benchZ - 0.5);
             scene.add(rightUpright);
 
             // Rack hooks (J-hooks to hold barbell)
             const hookGeo = new THREE.BoxGeometry(0.08, 0.04, 0.12);
-            const leftHook = new THREE.Mesh(hookGeo, blackMetal.clone());
+            const leftHook = new THREE.Mesh(hookGeo, blackMetal);
             leftHook.position.set(benchX - 0.35, deckY + 1.4, benchZ - 0.45);
             scene.add(leftHook);
 
-            const rightHook = new THREE.Mesh(hookGeo.clone(), blackMetal.clone());
+            const rightHook = new THREE.Mesh(hookGeo.clone(), blackMetal);
             rightHook.position.set(benchX + 0.35, deckY + 1.4, benchZ - 0.45);
             scene.add(rightHook);
 
@@ -2606,20 +2680,20 @@
             plateGeo.rotateZ(Math.PI / 2);
 
             // Left side plates
-            const leftPlate1 = new THREE.Mesh(plateGeo, ironMat.clone());
+            const leftPlate1 = new THREE.Mesh(plateGeo, ironMat);
             leftPlate1.position.set(benchX - 0.7, deckY + 1.45, benchZ - 0.45);
             scene.add(leftPlate1);
 
-            const leftPlate2 = new THREE.Mesh(plateGeo.clone(), ironMat.clone());
+            const leftPlate2 = new THREE.Mesh(plateGeo.clone(), ironMat);
             leftPlate2.position.set(benchX - 0.8, deckY + 1.45, benchZ - 0.45);
             scene.add(leftPlate2);
 
             // Right side plates
-            const rightPlate1 = new THREE.Mesh(plateGeo.clone(), ironMat.clone());
+            const rightPlate1 = new THREE.Mesh(plateGeo.clone(), ironMat);
             rightPlate1.position.set(benchX + 0.7, deckY + 1.45, benchZ - 0.45);
             scene.add(rightPlate1);
 
-            const rightPlate2 = new THREE.Mesh(plateGeo.clone(), ironMat.clone());
+            const rightPlate2 = new THREE.Mesh(plateGeo.clone(), ironMat);
             rightPlate2.position.set(benchX + 0.8, deckY + 1.45, benchZ - 0.45);
             scene.add(rightPlate2);
 
@@ -2627,11 +2701,11 @@
             const collarGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8);
             collarGeo.rotateZ(Math.PI / 2);
 
-            const leftCollar = new THREE.Mesh(collarGeo, silverMetal.clone());
+            const leftCollar = new THREE.Mesh(collarGeo, silverMetal);
             leftCollar.position.set(benchX - 0.85, deckY + 1.45, benchZ - 0.45);
             scene.add(leftCollar);
 
-            const rightCollar = new THREE.Mesh(collarGeo.clone(), silverMetal.clone());
+            const rightCollar = new THREE.Mesh(collarGeo.clone(), silverMetal);
             rightCollar.position.set(benchX + 0.85, deckY + 1.45, benchZ - 0.45);
             scene.add(rightCollar);
         }
@@ -2658,7 +2732,7 @@
             leftRail.position.set(ladderX, deckY - 0.4, ladderZ - 0.25);
             scene.add(leftRail);
 
-            const rightRail = new THREE.Mesh(railGeo.clone(), metalMat.clone());
+            const rightRail = new THREE.Mesh(railGeo.clone(), metalMat);
             rightRail.position.set(ladderX, deckY - 0.4, ladderZ + 0.25);
             scene.add(rightRail);
 
@@ -2670,11 +2744,11 @@
             );
             const handleGeo = new THREE.TubeGeometry(handleCurve, 12, 0.04, 8, false);
 
-            const leftHandle = new THREE.Mesh(handleGeo, metalMat.clone());
+            const leftHandle = new THREE.Mesh(handleGeo, metalMat);
             leftHandle.position.set(ladderX, deckY + 0.8, ladderZ - 0.25);
             scene.add(leftHandle);
 
-            const rightHandle = new THREE.Mesh(handleGeo.clone(), metalMat.clone());
+            const rightHandle = new THREE.Mesh(handleGeo.clone(), metalMat);
             rightHandle.position.set(ladderX, deckY + 0.8, ladderZ + 0.25);
             scene.add(rightHandle);
 
@@ -2683,7 +2757,7 @@
             rungGeo.rotateX(Math.PI / 2);
 
             for (let i = 0; i < 4; i++) {
-                const rung = new THREE.Mesh(rungGeo.clone(), metalMat.clone());
+                const rung = new THREE.Mesh(rungGeo.clone(), metalMat);
                 rung.position.set(ladderX, deckY - 1.4 + i * 0.5, ladderZ);
                 scene.add(rung);
             }
@@ -2701,7 +2775,7 @@
 
             for (let i = 0; i < rainCount; i++) {
                 positions[i * 3] = (Math.random() - 0.5) * 60;
-                positions[i * 3 + 1] = Math.random() * 25;
+                positions[i * 3 + 1] = -5 + Math.random() * 17;  // Stay below the camera
                 positions[i * 3 + 2] = (Math.random() - 0.5) * 60;
                 velocities[i] = 0.3 + Math.random() * 0.2;
             }
@@ -2722,18 +2796,19 @@
             scene.add(rainParticles);
         }
 
-        function updateRain() {
+        function updateRain(dt) {
             if (!rainParticles || !rainParticles.visible) return;
 
             const positions = rainGeometry.attributes.position.array;
             const velocities = rainGeometry.attributes.velocity.array;
+            const step = dt * 60;  // Velocities were tuned per 60fps frame
 
             for (let i = 0; i < positions.length / 3; i++) {
-                positions[i * 3 + 1] -= velocities[i];
+                positions[i * 3 + 1] -= velocities[i] * step;
 
                 // Reset raindrop when it falls below ground
                 if (positions[i * 3 + 1] < -5) {
-                    positions[i * 3 + 1] = 20 + Math.random() * 5;
+                    positions[i * 3 + 1] = 9 + Math.random() * 3;
                     positions[i * 3] = (Math.random() - 0.5) * 60;
                     positions[i * 3 + 2] = (Math.random() - 0.5) * 60;
                 }
@@ -2769,27 +2844,57 @@
 
         function createRippleUniforms() {
             return {
-                uRipplePositions: { value: [] },
-                uRippleParams: { value: [] },
+                uRipplePositions: { value: ripplePositionsCache },
+                uRippleParams: { value: rippleParamsCache },
                 uRippleSpeed: { value: CONFIG.rippleSpeed }
             };
         }
 
+        function createCaustics() {
+            // ~24 texels per world unit on desktop, ~15 on mobile
+            const res = isMobile ? [240, 300] : [384, 480];
+            causticsTarget = new THREE.WebGLRenderTarget(res[0], res[1], {
+                type: THREE.HalfFloatType,
+                depthBuffer: false,
+                minFilter: THREE.LinearFilter,
+                magFilter: THREE.LinearFilter
+            });
+
+            causticsMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uWaterDepth: { value: CONFIG.waterDepth },
+                    uCausticIntensity: { value: CONFIG.causticIntensity },
+                    uFloorSize: { value: new THREE.Vector2(16, 20) },
+                    ...createRippleUniforms()
+                },
+                vertexShader: causticsVS,
+                fragmentShader: causticsFS,
+                depthTest: false,
+                depthWrite: false
+            });
+
+            causticsScene = new THREE.Scene();
+            const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), causticsMaterial);
+            quad.frustumCulled = false;
+            causticsScene.add(quad);
+            causticsCamera = new THREE.Camera();
+        }
+
         function createFloor() {
+            createCaustics();
+
             const geo = new THREE.PlaneGeometry(16, 20);
             geo.rotateX(-Math.PI / 2);
 
             const mat = new THREE.ShaderMaterial({
                 uniforms: {
-                    uTime: { value: 0 },
                     uPoolColor: { value: CONFIG.poolColor },
                     uPoolColorDeep: { value: CONFIG.poolColorDeep },
                     uPoolColorDark: { value: CONFIG.poolColorDark },
                     uFloorColor: { value: CONFIG.floorColor },
                     uGroutColor: { value: CONFIG.groutColor },
-                    uWaterDepth: { value: CONFIG.waterDepth },
-                    uCausticIntensity: { value: CONFIG.causticIntensity },
-                    ...createRippleUniforms()
+                    uCaustics: { value: causticsTarget.texture }
                 },
                 vertexShader: floorVS,
                 fragmentShader: floorFS
@@ -3003,19 +3108,31 @@
             toyGroups.push(group);
         }
 
+        const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const hitPoint = new THREE.Vector3();
+        const hitPoint2D = new THREE.Vector2();
+
+        // Returns a shared Vector2 (copy it if you need to keep it), or null if off the water plane
         function screenToWorld(x, y) {
             mouse.x = (x / window.innerWidth) * 2 - 1;
             mouse.y = -(y / window.innerHeight) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
-            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-            const pt = new THREE.Vector3();
-            raycaster.ray.intersectPlane(plane, pt);
-            return new THREE.Vector2(pt.x, pt.z);
+            if (!raycaster.ray.intersectPlane(waterPlane, hitPoint)) return null;
+            return hitPoint2D.set(hitPoint.x, hitPoint.z);
+        }
+
+        function moveCursor(x, y) {
+            cursorEl.style.setProperty('--x', x + 'px');
+            cursorEl.style.setProperty('--y', y + 'px');
+        }
+
+        function clampPan() {
+            cameraPanX = Math.max(-10, Math.min(10, cameraPanX));
+            cameraPanZ = Math.max(-12, Math.min(12, cameraPanZ));
         }
 
         function onMouseMove(e) {
-            cursorEl.style.left = e.clientX + 'px';
-            cursorEl.style.top = e.clientY + 'px';
+            moveCursor(e.clientX, e.clientY);
 
             // Handle panning while right-click dragging
             if (isDragging) {
@@ -3023,8 +3140,7 @@
                 const deltaY = (e.clientY - dragStart.y) * 0.02;
                 cameraPanX -= deltaX;
                 cameraPanZ -= deltaY;
-                cameraPanX = Math.max(-10, Math.min(10, cameraPanX));
-                cameraPanZ = Math.max(-12, Math.min(12, cameraPanZ));
+                clampPan();
                 dragStart.set(e.clientX, e.clientY);
                 updateCameraPOV(currentPOV);
                 return;
@@ -3050,6 +3166,9 @@
                 dragStart.set(e.clientX, e.clientY);
                 return;
             }
+
+            // Clicks on the UI controls shouldn't splash the pool
+            if (e.target !== renderer.domElement) return;
 
             isMouseDown = true;
             cursorEl.classList.add('active');
@@ -3133,6 +3252,7 @@
 
             fallingCoconuts.push({
                 mesh: coconut,
+                palm,
                 velocity: 0,
                 groundY: palm.userData.groundY - 0.1,
                 bounces: 0
@@ -3158,11 +3278,12 @@
                     if (fc.bounces < 3) {
                         fc.velocity = -fc.velocity * 0.4; // Bounce
                     } else {
-                        // Stop bouncing, remove after a delay
+                        // Stop bouncing, then regrow on the palm after a delay
                         fc.velocity = 0;
-                        // Fade out and remove
                         setTimeout(() => {
-                            scene.remove(fc.mesh);
+                            fc.mesh.position.copy(fc.mesh.userData.homePos);
+                            fc.mesh.rotation.set(0, 0, 0);
+                            fc.palm.add(fc.mesh);
                         }, 3000);
                         fallingCoconuts.splice(i, 1);
                     }
@@ -3202,8 +3323,7 @@
             }
             e.preventDefault();
             const t = e.touches[0];
-            cursorEl.style.left = t.clientX + 'px';
-            cursorEl.style.top = t.clientY + 'px';
+            moveCursor(t.clientX, t.clientY);
             cursorEl.classList.add('active');
 
             checkInteractiveClick(t.clientX, t.clientY);
@@ -3222,8 +3342,7 @@
             }
             e.preventDefault();
             const t = e.touches[0];
-            cursorEl.style.left = t.clientX + 'px';
-            cursorEl.style.top = t.clientY + 'px';
+            moveCursor(t.clientX, t.clientY);
 
             const wp = screenToWorld(t.clientX, t.clientY);
             if (!wp) return;
@@ -3240,30 +3359,40 @@
             cursorEl.classList.remove('active');
         }
 
+        // If the device can't keep up, step the render resolution down (never below 1x)
+        let pixelRatio = 1;
+        let perfWarmup = 3, perfTime = 0, perfFrames = 0;
+        function adaptResolution(dt) {
+            if (perfWarmup > 0) { perfWarmup -= dt; return; }
+            perfTime += dt;
+            perfFrames++;
+            if (perfTime < 2) return;
+            const avg = perfTime / perfFrames;
+            perfTime = 0;
+            perfFrames = 0;
+            if (avg > 1 / 40 && pixelRatio > 1) {
+                pixelRatio = Math.max(1, pixelRatio - 0.25);
+                renderer.setPixelRatio(pixelRatio);
+            }
+        }
+
         function onResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        // All ripple uniforms share these arrays, so filling them updates every material
         function updateUniforms() {
-            const data = getRippleData();
-
-            // Reuse pre-allocated Vector2 arrays instead of creating new objects
             for (let i = 0; i < MAX_RIPPLES; i++) {
-                ripplePositionsCache[i].set(data.positions[i * 2], data.positions[i * 2 + 1]);
-                rippleParamsCache[i].set(data.params[i * 2], data.params[i * 2 + 1]);
+                if (i < ripples.length) {
+                    ripplePositionsCache[i].set(ripples[i].x, ripples[i].z);
+                    rippleParamsCache[i].set(ripples[i].time, ripples[i].strength);
+                } else {
+                    ripplePositionsCache[i].set(0, 0);
+                    rippleParamsCache[i].set(-1, 0);
+                }
             }
-
-            floor.material.uniforms.uRipplePositions.value = ripplePositionsCache;
-            floor.material.uniforms.uRippleParams.value = rippleParamsCache;
-            water.material.uniforms.uRipplePositions.value = ripplePositionsCache;
-            water.material.uniforms.uRippleParams.value = rippleParamsCache;
-
-            toys.forEach(toy => {
-                toy.material.uniforms.uRipplePositions.value = ripplePositionsCache;
-                toy.material.uniforms.uRippleParams.value = rippleParamsCache;
-            });
         }
 
         function updateToys(dt, elapsed) {
@@ -3274,7 +3403,7 @@
                 group.position.z += group.driftDir.y * group.driftSpeed * dt * 60;
 
                 // Slow down
-                group.driftSpeed *= 0.995;
+                group.driftSpeed *= Math.pow(0.995, dt * 60);
                 if (group.driftSpeed < 0.005) group.driftSpeed = 0.005;
 
                 // Bounce off edges - keep toys well within pool water
@@ -3295,10 +3424,10 @@
                 group.rotation += group.rotSpeed * dt;
 
                 // Update all meshes in group
-                group.meshes.forEach(mesh => {
+                for (const mesh of group.meshes) {
                     mesh.material.uniforms.uToyRotation.value = group.rotation;
                     mesh.material.uniforms.uTime.value = elapsed;
-                });
+                }
             });
 
             // Collision detection between toy groups - gentle bumping
@@ -3347,15 +3476,11 @@
             }
 
             // Cap speeds and dampen spin
+            const spinDamp = Math.pow(0.98, dt * 60);
             toyGroups.forEach(group => {
                 group.driftSpeed = Math.min(group.driftSpeed, 0.06);
-                group.rotSpeed *= 0.98;
+                group.rotSpeed *= spinDamp;
                 group.rotSpeed = Math.max(-0.3, Math.min(0.3, group.rotSpeed));
-            });
-
-            // Also update ripple uniforms for all toy meshes
-            toys.forEach(toy => {
-                // Ripple uniforms are updated in updateUniforms()
             });
         }
 
@@ -3368,11 +3493,11 @@
             updateRipples(dt);
             updateUniforms();
             updateToys(dt, elapsed);
-            updateRain();
+            updateRain(dt);
             updateFallingCoconuts(dt);
             updateDivingBoardBobble(dt);
 
-            floor.material.uniforms.uTime.value = elapsed;
+            causticsMaterial.uniforms.uTime.value = elapsed;
             water.material.uniforms.uTime.value = elapsed;
 
             // Animate waterfall
@@ -3380,7 +3505,12 @@
                 window.waterfallMesh.material.uniforms.uTime.value = elapsed;
             }
 
+            renderer.setRenderTarget(causticsTarget);
+            renderer.render(causticsScene, causticsCamera);
+            renderer.setRenderTarget(null);
             renderer.render(scene, camera);
+
+            adaptResolution(dt);
         }
 
         init();
