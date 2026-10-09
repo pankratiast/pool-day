@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Pool Day</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { overflow: hidden; background: #0a4a6e; }
-        canvas { display: block; cursor: none; }
+        canvas { display: block; cursor: none; touch-action: none; }
+        button, input { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
         #cursor {
             position: fixed;
             left: 0;
@@ -29,7 +30,7 @@
         /* POV Slider */
         #pov-control {
             position: fixed;
-            bottom: 20px;
+            bottom: calc(20px + env(safe-area-inset-bottom));
             left: 50%;
             transform: translateX(-50%);
             display: flex;
@@ -80,7 +81,7 @@
         /* Audio Control */
         #audio-control {
             position: fixed;
-            bottom: 20px;
+            bottom: calc(20px + env(safe-area-inset-bottom));
             right: 20px;
             z-index: 100;
         }
@@ -117,7 +118,7 @@
         /* Weather Controls */
         #weather-control {
             position: fixed;
-            bottom: 20px;
+            bottom: calc(20px + env(safe-area-inset-bottom));
             left: 20px;
             display: flex;
             gap: 8px;
@@ -148,6 +149,12 @@
             width: 22px;
             height: 22px;
             fill: rgba(255, 255, 255, 0.8);
+        }
+        /* Narrow screens: lift the View slider above the round buttons */
+        @media (max-width: 520px) {
+            #pov-control { bottom: calc(76px + env(safe-area-inset-bottom)); }
+            #weather-control { left: 16px; }
+            #audio-control { right: 16px; }
         }
     </style>
 </head>
@@ -225,6 +232,9 @@
             rippleDecay: 1.0,
             rippleStrength: 0.4
         };
+
+        // Water surface height: just below the pool coping (wall tops are at -3.7)
+        const WATER_LEVEL = -3.85;
 
         // ============================================================
         // RIPPLES
@@ -672,8 +682,10 @@
 
         // Camera panning
         let cameraTarget = new THREE.Vector3(0, 0, 0);
-        let cameraPanX = 0;
+        let cameraPanX = 0;   // Requested pan
         let cameraPanZ = 0;
+        let viewPanX = 0;     // Smoothed pan the camera actually uses
+        let viewPanZ = 0;
         let isDragging = false;
         let dragStart = new THREE.Vector2();
         let currentPOV = 15;
@@ -731,7 +743,8 @@
             scene.background = new THREE.Color(0x075985);
 
             // Camera with adjustable POV
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 200);
+            updateCameraFOV();
             updateCameraPOV(15);  // Default: 1-2 o'clock position
 
             // Disable anti-aliasing on mobile for performance
@@ -823,15 +836,39 @@
             document.getElementById('rain-btn').addEventListener('click', () => setWeather('rain'));
         }
 
+        // Portrait screens get a slightly wider lens; distance is handled in updateCameraPOV
+        function updateCameraFOV() {
+            camera.fov = camera.aspect < 1 ? 60 : 50;
+            camera.updateProjectionMatrix();
+        }
+
         // Update camera position based on POV slider and pan offset
         function updateCameraPOV(value) {
             currentPOV = value;
             const t = value / 100;
-            const height = 18 - t * 5;  // Raised slightly
-            const zOffset = 8 + t * 10;  // Backed up camera (was 0 + t * 10)
-            camera.position.set(cameraPanX, height, zOffset + cameraPanZ);
-            cameraTarget.set(cameraPanX, 0, cameraPanZ);
+            let height = 18 - t * 5;  // Raised slightly
+            let zOffset = 8 + t * 10;  // Backed up camera (was 0 + t * 10)
+
+            // On narrow screens, back the camera off along the same angle so the pool fits
+            const tanHalfW = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
+            const zoomOut = Math.min(2.5, Math.max(1, 11 / (Math.hypot(height, zOffset) * tanHalfW)));
+            height *= zoomOut;
+            zOffset *= zoomOut;
+
+            camera.position.set(viewPanX, height, zOffset + viewPanZ);
+            cameraTarget.set(viewPanX, 0, viewPanZ);
             camera.lookAt(cameraTarget);
+        }
+
+        // Ease the camera toward the requested pan so wheel/trackpad scrolling glides
+        function updateCameraPan(dt) {
+            const dx = cameraPanX - viewPanX;
+            const dz = cameraPanZ - viewPanZ;
+            if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return;
+            const k = 1 - Math.exp(-dt * 12);
+            viewPanX += dx * k;
+            viewPanZ += dz * k;
+            updateCameraPOV(currentPOV);
         }
 
         // Handle mouse wheel for zooming/panning
@@ -845,7 +882,6 @@
             }
             // Same limits as right-drag panning so the camera doesn't jump
             clampPan();
-            updateCameraPOV(currentPOV);
         }
 
         // ============================================================
@@ -871,7 +907,9 @@
 
             // Simple hash for noise
             float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
             }
 
             float noise(vec2 p) {
@@ -952,7 +990,9 @@
             varying vec3 vWorldPos;
 
             float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
             }
 
             float noise(vec2 p) {
@@ -998,7 +1038,9 @@
             varying vec3 vWorldPos;
 
             float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
             }
 
             float noise(vec2 p) {
@@ -1033,7 +1075,9 @@
             varying vec3 vWorldPos;
 
             float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
             }
 
             float noise(vec2 p) {
@@ -1070,7 +1114,9 @@
             varying vec3 vWorldPos;
 
             float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
             }
 
             float noise(vec2 p) {
@@ -1124,7 +1170,11 @@
             // Sand area (left side) - beach-like
             const sandMat = new THREE.ShaderMaterial({
                 vertexShader: rockVS,
-                fragmentShader: sandFS
+                fragmentShader: sandFS,
+                // Grass overlaps the sand at the same height; push sand back so grass wins cleanly
+                polygonOffset: true,
+                polygonOffsetFactor: 1,
+                polygonOffsetUnits: 4
             });
             const sandArea = new THREE.PlaneGeometry(25, 50);
             sandArea.rotateX(-Math.PI / 2);
@@ -1135,7 +1185,11 @@
             // Sand area (right side) - matching left side
             const sandMatRight = new THREE.ShaderMaterial({
                 vertexShader: rockVS,
-                fragmentShader: sandFS
+                fragmentShader: sandFS,
+                // Grass overlaps the sand at the same height; push sand back so grass wins cleanly
+                polygonOffset: true,
+                polygonOffsetFactor: 1,
+                polygonOffsetUnits: 4
             });
             const sandAreaRight = new THREE.PlaneGeometry(25, 50);
             sandAreaRight.rotateX(-Math.PI / 2);
@@ -1182,15 +1236,15 @@
 
             // Splash pool at base of waterfall - wider to match
             const splashGeo = new THREE.CapsuleGeometry(3, 12, 8, 16);
-            splashGeo.rotateX(-Math.PI / 2);
-            splashGeo.rotateZ(Math.PI / 2);
+            splashGeo.rotateZ(Math.PI / 2);         // Long axis across the waterfall's width
+            splashGeo.scale(1, 0.05, 0.25);         // Flat pool hugging the cliff base
             const splashMat = new THREE.MeshBasicMaterial({
                 color: 0x6BBED9,
                 transparent: true,
                 opacity: 0.6
             });
             const splash = new THREE.Mesh(splashGeo, splashMat);
-            splash.position.set(0, -2.85, -13);
+            splash.position.set(0, -2.9, -14.7);
             scene.add(splash);
 
             // Grass areas - front and back of pool (EXTENDED further south)
@@ -2852,7 +2906,7 @@
 
         function createCaustics() {
             // ~24 texels per world unit on desktop, ~15 on mobile
-            const res = isMobile ? [240, 300] : [384, 480];
+            const res = isMobile ? [192, 240] : [384, 480];
             causticsTarget = new THREE.WebGLRenderTarget(res[0], res[1], {
                 type: THREE.HalfFloatType,
                 depthBuffer: false,
@@ -2926,6 +2980,7 @@
             });
 
             water = new THREE.Mesh(geo, mat);
+            water.position.y = WATER_LEVEL;
             scene.add(water);
         }
 
@@ -3070,7 +3125,7 @@
 
         function createToyGroup(opts) {
             const group = {
-                position: opts.position.clone(),
+                position: opts.position.clone().setY(WATER_LEVEL),
                 radius: opts.radius,
                 bobPhase: opts.bobPhase,
                 driftSpeed: 0.008 + Math.random() * 0.012,
@@ -3108,7 +3163,7 @@
             toyGroups.push(group);
         }
 
-        const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_LEVEL);
         const hitPoint = new THREE.Vector3();
         const hitPoint2D = new THREE.Vector2();
 
@@ -3142,7 +3197,6 @@
                 cameraPanZ -= deltaY;
                 clampPan();
                 dragStart.set(e.clientX, e.clientY);
-                updateCameraPOV(currentPOV);
                 return;
             }
 
@@ -3316,12 +3370,26 @@
             }
         }
 
+        const touchPanStart = new THREE.Vector2();
+        const touchMid = new THREE.Vector2();
+        function touchMidpoint(touches) {
+            return touchMid.set(
+                (touches[0].clientX + touches[1].clientX) / 2,
+                (touches[0].clientY + touches[1].clientY) / 2
+            );
+        }
+
         function onTouchStart(e) {
             // Allow touch events on UI controls
             if (e.target.closest('#pov-control, #audio-control, #weather-control')) {
                 return;
             }
             e.preventDefault();
+            if (e.touches.length >= 2) {
+                touchPanStart.copy(touchMidpoint(e.touches));
+                cursorEl.classList.remove('active');
+                return;
+            }
             const t = e.touches[0];
             moveCursor(t.clientX, t.clientY);
             cursorEl.classList.add('active');
@@ -3341,6 +3409,14 @@
                 return;
             }
             e.preventDefault();
+            if (e.touches.length >= 2) {
+                const mid = touchMidpoint(e.touches);
+                cameraPanX -= (mid.x - touchPanStart.x) * 0.04;
+                cameraPanZ -= (mid.y - touchPanStart.y) * 0.04;
+                clampPan();
+                touchPanStart.copy(mid);
+                return;
+            }
             const t = e.touches[0];
             moveCursor(t.clientX, t.clientY);
 
@@ -3370,15 +3446,17 @@
             const avg = perfTime / perfFrames;
             perfTime = 0;
             perfFrames = 0;
-            if (avg > 1 / 40 && pixelRatio > 1) {
-                pixelRatio = Math.max(1, pixelRatio - 0.25);
+            const minRatio = isMobile ? 0.75 : 1;
+            if (avg > 1 / 40 && pixelRatio > minRatio) {
+                pixelRatio = Math.max(minRatio, pixelRatio - 0.25);
                 renderer.setPixelRatio(pixelRatio);
             }
         }
 
         function onResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
+            updateCameraFOV();
+            updateCameraPOV(currentPOV);
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
@@ -3490,6 +3568,7 @@
             const dt = Math.min(clock.getDelta(), 0.1);
             const elapsed = clock.getElapsedTime() * CONFIG.waveSpeed;
 
+            updateCameraPan(dt);
             updateRipples(dt);
             updateUniforms();
             updateToys(dt, elapsed);
