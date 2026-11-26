@@ -863,6 +863,48 @@
                 if (poolFitsInView()) hi = d; else lo = d;
             }
             placeCamera(Math.max(hi, minCameraDistance));
+
+            // Portrait screens have spare height: slide the view so the pool sits lower,
+            // just above the bottom controls, instead of floating mid-screen over a field of grass.
+            if (camera.aspect < 1) {
+                camUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+                camBase.copy(camera.position);
+                targetBase.copy(cameraTarget);
+                let a = 0, b = Math.max(hi, minCameraDistance);
+                for (let i = 0; i < 18; i++) {
+                    const u = (a + b) / 2;
+                    shiftCamera(u);
+                    const { minY, maxY } = poolScreenYRange();
+                    if (minY >= PORTRAIT_POOL_BOTTOM && maxY <= POOL_FRAME.margin) a = u; else b = u;
+                }
+                shiftCamera(a);
+            }
+        }
+
+        // NDC y where the pool's near edge should land on portrait screens (above the VIEW slider)
+        const PORTRAIT_POOL_BOTTOM = -0.6;
+        const camUp = new THREE.Vector3();
+        const camBase = new THREE.Vector3();
+        const targetBase = new THREE.Vector3();
+
+        // Move camera and target together along the camera's screen-up axis (keeps the angle)
+        function shiftCamera(u) {
+            camera.position.copy(camBase).addScaledVector(camUp, u);
+            cameraTarget.copy(targetBase).addScaledVector(camUp, u);
+            camera.updateMatrixWorld();
+        }
+
+        function poolScreenYRange() {
+            const { halfX, minZ, maxZ, y } = POOL_FRAME;
+            let minY = Infinity, maxY = -Infinity;
+            for (const cx of [-halfX, halfX]) {
+                for (const cz of [minZ, maxZ]) {
+                    fitCorner.set(cx + viewPanX, y, cz + viewPanZ).project(camera);
+                    minY = Math.min(minY, fitCorner.y);
+                    maxY = Math.max(maxY, fitCorner.y);
+                }
+            }
+            return { minY, maxY };
         }
 
         const POOL_FRAME = { halfX: 10.5, minZ: -11.5, maxZ: 12.5, centerZ: 0.5, y: -3.7, margin: 0.94 };
@@ -1281,11 +1323,15 @@
                 fragmentShader: grassFS
             });
 
-            // Front grass area - extended much further south
-            const grassFront = new THREE.PlaneGeometry(80, 50);
+            // Front grass area - extended much further south.
+            // Starts past the front coping + a strip of deck (z ≈ 12.5) so it doesn't cover the
+            // pool's tile perimeter (the grass sits higher than the coping/deck).
+            const grassFrontStart = 12.5;
+            const grassFrontEnd = 60;
+            const grassFront = new THREE.PlaneGeometry(80, grassFrontEnd - grassFrontStart);
             grassFront.rotateX(-Math.PI / 2);
             const grassFrontMesh = new THREE.Mesh(grassFront, grassMat);
-            grassFrontMesh.position.set(0, -2.95, 35);
+            grassFrontMesh.position.set(0, -2.95, (grassFrontStart + grassFrontEnd) / 2);
             scene.add(grassFrontMesh);
 
             // Back grass (between pool and cliffs)
