@@ -846,18 +846,46 @@
         function updateCameraPOV(value) {
             currentPOV = value;
             const t = value / 100;
-            let height = 18 - t * 5;  // Raised slightly
-            let zOffset = 8 + t * 10;  // Backed up camera (was 0 + t * 10)
+            // Viewing angle from the POV slider (same angles as before)
+            const height = 18 - t * 5;
+            const zOffset = 8 + t * 10;
+            camDir.set(0, height, zOffset).normalize();
 
-            // On narrow screens, back the camera off along the same angle so the pool fits
-            const tanHalfW = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
-            const zoomOut = Math.min(2.5, Math.max(1, 11 / (Math.hypot(height, zOffset) * tanHalfW)));
-            height *= zoomOut;
-            zOffset *= zoomOut;
+            // Aim at the middle of the pool at deck level (the pool sits at y ≈ -3.7, not 0)
+            cameraTarget.set(viewPanX, POOL_FRAME.y, POOL_FRAME.centerZ + viewPanZ);
 
-            camera.position.set(viewPanX, height, zOffset + viewPanZ);
-            cameraTarget.set(viewPanX, 0, viewPanZ);
+            // Find the closest distance that keeps the whole pool (coping + a strip of deck) on screen,
+            // checking height as well as width so the near edge never gets cut off.
+            let lo = 5, hi = 120;
+            for (let i = 0; i < 18; i++) {
+                const d = (lo + hi) / 2;
+                placeCamera(d);
+                if (poolFitsInView()) hi = d; else lo = d;
+            }
+            placeCamera(Math.max(hi, minCameraDistance));
+        }
+
+        const POOL_FRAME = { halfX: 10.5, minZ: -11.5, maxZ: 12.5, centerZ: 0.5, y: -3.7, margin: 0.94 };
+        const camDir = new THREE.Vector3();
+        const fitCorner = new THREE.Vector3();
+        // Never push in closer than the original framing
+        const minCameraDistance = 20;
+
+        function placeCamera(d) {
+            camera.position.copy(cameraTarget).addScaledVector(camDir, d);
             camera.lookAt(cameraTarget);
+            camera.updateMatrixWorld();
+        }
+
+        function poolFitsInView() {
+            const { halfX, minZ, maxZ, y, margin } = POOL_FRAME;
+            for (const cx of [-halfX, halfX]) {
+                for (const cz of [minZ, maxZ]) {
+                    fitCorner.set(cx + viewPanX, y, cz + viewPanZ).project(camera);
+                    if (Math.abs(fitCorner.x) > margin || Math.abs(fitCorner.y) > margin || fitCorner.z > 1) return false;
+                }
+            }
+            return true;
         }
 
         // Ease the camera toward the requested pan so wheel/trackpad scrolling glides
